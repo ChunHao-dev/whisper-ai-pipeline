@@ -12,6 +12,8 @@ export interface WhisperParams {
   audio_ctx?: number;
   max_len?: number;
   progress_callback?: (progress: number) => void;
+  new_segment_callback?:(segment: [number, number, string]) => void;
+  segment_callback?: (segment: {text:string, t0: number, t1: number}) => void;
 }
 
 export interface WhisperResult {
