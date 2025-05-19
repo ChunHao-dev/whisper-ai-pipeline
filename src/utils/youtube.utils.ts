@@ -22,7 +22,8 @@ export const downloadAndProcessYoutube = async (
 ): Promise<string> => {
   const videoId = extractVideoId(url);
   const outputPath = `uploads/${videoId}.wav`;
-  const onlyUrl = `${url}?v=${url.split("?")[0]}`;
+  const onlyUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  console.log(`下載 Youtube 影片 ${onlyUrl} 的音檔`);
   try {
     // 下載並轉換為 WAV
 
@@ -30,7 +31,6 @@ export const downloadAndProcessYoutube = async (
       extractAudio: true,
       audioFormat: "wav",
       output: outputPath,
-      postprocessorArgs: "--audio-quality 0 -ar 16000 -ac 1"
     });
 
     youtubeEmitter.emitDownloadComplete(jobId);
