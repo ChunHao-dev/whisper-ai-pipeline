@@ -7,6 +7,12 @@ export const EVENTS = {
     PROGRESS: 'transcription-progress',
     COMPLETE: 'transcription-complete',
     ERROR: 'transcription-error',
+  },
+  YOUTUBE: {
+    DOWNLOAD_PROGRESS: 'youtube-download-progress',
+    DOWNLOAD_COMPLETE: 'youtube-download-complete',
+    DOWNLOAD_ERROR: 'youtube-download-error',
+    AUDIO_READY: 'youtube-audio-ready'
   }
 } as const;
 
@@ -41,4 +47,16 @@ export interface TranscriptionCompleteData {
 export interface TranscriptionErrorData {
   jobId: string;
   error: string;
+}
+
+export interface YoutubeDownloadProgress {
+  jobId: string;
+  percent: number;
+  speed: string;
+  downloaded: number;
+}
+
+export interface YoutubeAudioData {
+  jobId: string;
+  audioData: string;  // base64 編碼的音檔
 }

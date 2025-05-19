@@ -30,7 +30,7 @@ transcribe(params: WhisperParams)
 const formData = new FormData();
 formData.append('audio', audioFile);
 
-const response = await fetch('http://localhost:3000/api/transcribe', {
+const response = await fetch('http://localhost: 5566/api/transcribe', {
   method: 'POST',
   body: formData
 });
@@ -42,7 +42,7 @@ const { jobId, status } = await response.json();
 ```typescript
 import { io } from 'socket.io-client';
 
-const socket = io('http://localhost:3000');
+const socket = io('http://localhost: 5566');
 
 // 監聽連接狀態
 socket.on('connect', () => {
@@ -102,7 +102,7 @@ const TranscriptionComponent = () => {
 
   useEffect(() => {
     // 建立連接
-    const socket = io('http://localhost:3000');
+    const socket = io('http://localhost: 5566');
     setSocket(socket);
 
     // 連接成功後訂閱任務

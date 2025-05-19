@@ -117,7 +117,7 @@ io.on('connection', (socket) => {
 });
 
 // 客戶端使用
-const socket = io('http://localhost:3000', {
+const socket = io('http://localhost: 5566', {
     reconnection: true,
     reconnectionAttempts: 5,
     reconnectionDelay: 1000,

@@ -20,7 +20,7 @@
 
 使用普通的 HTTP 請求：
 ```http
-POST http://localhost:3000/api/transcribe
+POST http://localhost: 5566/api/transcribe
 Content-Type: multipart/form-data
 
 Form Data:
@@ -41,7 +41,7 @@ Form Data:
 2. 點擊 "New" -> "WebSocket Request"
 3. 輸入連接 URL：
    ```
-   ws://localhost:3000
+   ws://localhost: 5566
    ```
 4. 點擊 "Connect" 建立連接
 

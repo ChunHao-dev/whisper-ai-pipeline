@@ -98,7 +98,7 @@
 
 #### 使用 curl 上傳檔案
 ```bash
-curl -X POST -F "audio=@音檔.wav" http://localhost:3000/api/transcribe
+curl -X POST -F "audio=@音檔.wav" http://localhost: 5566/api/transcribe
 ```
 
 #### 使用 WebSocket 監聽結果

@@ -8,7 +8,8 @@ import { createServer } from "http";
 import { v4 as uuidv4 } from "uuid";
 import { whisperService } from "./services/whisper.service";
 import { WhisperParams } from "./types/whisper.types";
-import { TranscribeResponse, ErrorResponse } from "./types/api.types";
+import { TranscribeResponse, ErrorResponse, YoutubeTranscribeRequest } from "./types/api.types";
+import { downloadAndProcessYoutube } from "./utils/youtube.utils";
 import { socketConfig } from "./config/socket";
 import {
   setupTranscriptionHandler,
@@ -57,6 +58,98 @@ app.get("/health", (_req: Request, res: Response) => {
 });
 
 // 轉錄 API - 檔案上傳版本
+// 轉錄 API - Youtube 版本
+app.post(
+  "/api/transcribe-youtube",
+  async (
+    req: Request<{}, {}, YoutubeTranscribeRequest>,
+    res: Response<TranscribeResponse | ErrorResponse>
+  ): Promise<void> => {
+    console.log("收到 Youtube 轉錄請求");
+    const { url, language = "en" } = req.body;
+    const jobId = uuidv4();
+    let segmentIndex = 1;
+    let audioPath = '';
+    try {
+      // 立即回應 jobId，表示任務已開始處理
+      res.json({
+        jobId,
+        status: "processing",
+      });
+
+      // 下載並處理 Youtube 音檔
+      audioPath = await downloadAndProcessYoutube(url, jobId);
+
+      // 準備轉錄參數
+      const params: WhisperParams = {
+        language,
+        model: join(process.cwd(), "models/ggml-large-v3-turbo.bin"),
+        use_gpu: true,
+        fname_inp: audioPath,
+        no_prints: true,
+        flash_attn: false,
+        comma_in_time: false,
+        translate: false,
+        no_timestamps: false,
+        audio_ctx: 0,
+        max_len: 0,
+        segment_callback: (segment) => {
+          const formattedSegment = {
+            ...segment,
+            index: segmentIndex++,
+            srtTimestamp: `${formatTimestamp(segment.t0)} --> ${formatTimestamp(segment.t1)}`,
+            startTime: formatTimestamp(segment.t0),
+            endTime: formatTimestamp(segment.t1)
+          };
+          
+          console.log(`${formattedSegment.index}\n${formattedSegment.srtTimestamp}\n${segment.text}\n`);
+          transcriptionEmitter.emitSegment(jobId, formattedSegment);
+        },
+        progress_callback: (progress) => {
+          transcriptionEmitter.emitProgress(jobId, progress);
+        },
+      };
+
+      // 開始轉錄處理
+      whisperService
+        .transcribe(params)
+        .then((result) => {
+          transcriptionEmitter.emitComplete(jobId, result);
+        })
+        .catch((error) => {
+          transcriptionEmitter.emitError(jobId, error);
+        })
+        .finally(async () => {
+          try {
+            if (audioPath) {
+              await fs.unlink(audioPath);
+            }
+            console.log("已清理暫存檔案:", audioPath);
+          } catch (error) {
+            console.error("清理暫存檔案失敗:", error);
+          }
+        });
+
+    } catch (error) {
+      console.error("Youtube 下載或轉錄初始化失敗:", error);
+      res.status(500).json({
+        jobId,
+        status: "error",
+        error: error instanceof Error ? error.message : "未知錯誤",
+      });
+
+      if (audioPath) {
+        try {
+          await fs.unlink(audioPath);
+          console.log("已清理暫存檔案:", audioPath);
+        } catch (cleanupError) {
+          console.error("清理暫存檔案失敗:", cleanupError);
+        }
+      }
+    }
+  }
+);
+
 app.post(
   "/api/transcribe",
   upload.single("audio"),
@@ -64,7 +157,7 @@ app.post(
     req: Request,
     res: Response<TranscribeResponse | ErrorResponse>
   ): Promise<void> => {
-    // 為每個轉錄任務創建一個序號計數器
+    // 為每個轉錄任務創建一個序號計數器（檔案上傳版本）
     let segmentIndex = 1;
     console.log("收到轉錄請求");
     console.log("上傳的檔案:", req.file);
@@ -152,7 +245,7 @@ app.post(
   }
 );
 
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 5566;
 httpServer.listen(port, () => {
   console.log(`伺服器運行在 http://localhost:${port}`);
 });

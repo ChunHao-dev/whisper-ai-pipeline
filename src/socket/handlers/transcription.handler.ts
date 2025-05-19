@@ -17,7 +17,7 @@ const removeSocketFromJobs = (socket: Socket): void => {
 };
 
 // 發送事件到指定的工作
-const emitToJob = (jobId: string, event: string, data: any): void => {
+export const emitToJob = (jobId: string, event: string, data: any): void => {
   const socket = jobSockets.get(jobId);
   if (socket) {
     // 發送原生事件

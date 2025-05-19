@@ -46,7 +46,7 @@ app.post('/api/transcribe', async (req, res) => {
   }
 });
 
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 5566;
 app.listen(port, () => {
   console.log(`伺服器運行在 http://localhost:${port}`);
 });

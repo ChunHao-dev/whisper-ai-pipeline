@@ -118,7 +118,7 @@ whisperCPPNodeJS/
      }
    });
 
-   const port = process.env.PORT || 3000;
+   const port = process.env.PORT || 5566;
    app.listen(port, () => {
      console.log(`伺服器運行在 http://localhost:${port}`);
    });
@@ -329,7 +329,7 @@ npm run dev
 
 ### 5.1 .env
 ```env
-PORT=3000
+PORT=5566
 NODE_ENV=development
 MAX_FILE_SIZE=100000000  # 100MB
 MAX_AUDIO_LENGTH=1800    # 30 minutes
