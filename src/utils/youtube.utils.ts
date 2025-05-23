@@ -1,6 +1,11 @@
 import youtubedl from "youtube-dl-exec";
 import fs from "fs/promises";
 import { youtubeEmitter } from "../socket/handlers/youtube.handler";
+interface VideoInfo {
+  duration: number;
+  title: string;
+  id: string;
+}
 
 /**
  * 從 URL 中提取 Youtube 影片 ID
@@ -14,34 +19,83 @@ export const extractVideoId = (url: string): string => {
 };
 
 /**
+ * 獲取影片資訊
+ */
+async function getVideoInfo(url: string): Promise<VideoInfo> {
+  try {
+    const result = await youtubedl(url, {
+      dumpSingleJson: true,
+      noCheckCertificates: true,
+      noWarnings: true,
+      preferFreeFormats: true,
+      forceOverwrites: true
+    });
+
+    if (typeof result === 'string') {
+      throw new Error('預期外的 youtube-dl 回應格式');
+    }
+    
+    if (!result.duration || !result.title || !result.id) {
+      throw new Error('無法取得完整的影片資訊');
+    }
+
+    return {
+      duration: result.duration,
+      title: result.title,
+      id: result.id
+    };
+  } catch (error) {
+    console.error('獲取影片資訊失敗:', error);
+    throw error;
+  }
+}
+
+/**
+ * 下載 Youtube 音檔
+ */
+async function downloadAudio(url: string, outputPath: string): Promise<void> {
+  await youtubedl(url, {
+    extractAudio: true,
+    audioFormat: "wav",
+    output: outputPath
+  });
+}
+
+/**
  * 下載並處理 Youtube 音檔
  */
 export const downloadAndProcessYoutube = async (
   url: string,
   jobId: string
-): Promise<string> => {
-  const videoId = extractVideoId(url);
-  const outputPath = `uploads/${videoId}.wav`;
-  const onlyUrl = `https://www.youtube.com/watch?v=${videoId}`;
-  console.log(`下載 Youtube 影片 ${onlyUrl} 的音檔`);
+): Promise<string[]> => {
   try {
-    // 下載並轉換為 WAV
+    // 1. 獲取影片資訊
+    const info = await getVideoInfo(url);
+    console.log("影片資訊:", info);
 
-    await youtubedl(onlyUrl, {
-      extractAudio: true,
-      audioFormat: "wav",
-      output: outputPath,
+    // 2. 通知前端資訊
+    youtubeEmitter.emitSegmentsInfo(jobId, {
+      totalSegments: 1,
+      segmentDuration: info.duration,
+      totalDuration: info.duration
     });
 
+    const videoId = info.id
+    const outputPath = `uploads/${videoId}.wav`;
+
+    // 3. 下載處理
+    youtubeEmitter.emitSegmentStart(jobId, 1);
+    await downloadAudio(url, outputPath);
+    console.log(`下載完成 : ${outputPath}`);
+
+    // 讀取並發送音檔資料
+    // const audioData = await fs.readFile(outputPath, { encoding: "base64" });
+    // youtubeEmitter.emitAudioReady(jobId, audioData);
+    youtubeEmitter.emitSegmentComplete(jobId, 1);
     youtubeEmitter.emitDownloadComplete(jobId);
 
-    // 讀取並轉換為 base64
-    const audioData = await fs.readFile(outputPath, { encoding: "base64" });
-
-    // 發送音檔數據
-    youtubeEmitter.emitAudioReady(jobId, audioData);
-
-    return outputPath;
+    // 返回音檔路徑 (為了與原有介面相容，包裝成陣列)
+    return [outputPath];
   } catch (error) {
     youtubeEmitter.emitError(
       jobId,

@@ -15,6 +15,7 @@ import {
   setupTranscriptionHandler,
   transcriptionEmitter,
 } from "./socket/handlers/transcription.handler";
+import { TranscriptionPartProgress } from "./socket/events";
 import { formatTimestamp } from "./utils/time.utils";
 
 const app = express();
@@ -69,7 +70,8 @@ app.post(
     const { url, language = "en" } = req.body;
     const jobId = uuidv4();
     let segmentIndex = 1;
-    let audioPath = '';
+    let audioFiles: string[] = [];
+    let allSegments: Array<{text: string; start: number; end: number; t0?: number; t1?: number}> = [];
     try {
       // 立即回應 jobId，表示任務已開始處理
       res.json({
@@ -78,14 +80,17 @@ app.post(
       });
 
       // 下載並處理 Youtube 音檔
-      audioPath = await downloadAndProcessYoutube(url, jobId);
+      const downloadedFiles = await downloadAndProcessYoutube(url, jobId);
+      audioFiles = downloadedFiles;
 
+      const filePath = audioFiles[0];
+      
       // 準備轉錄參數
       const params: WhisperParams = {
         language,
         model: join(process.cwd(), "models/ggml-large-v3-turbo.bin"),
         use_gpu: true,
-        fname_inp: audioPath,
+        fname_inp: filePath,
         no_prints: true,
         flash_attn: false,
         comma_in_time: false,
@@ -94,6 +99,7 @@ app.post(
         audio_ctx: 0,
         max_len: 0,
         segment_callback: (segment) => {
+          console.log(`---- andy[${formatTimestamp(segment.t0)} --> ${formatTimestamp(segment.t1)}] ${segment.text}`);
           const formattedSegment = {
             ...segment,
             index: segmentIndex++,
@@ -106,29 +112,39 @@ app.post(
           transcriptionEmitter.emitSegment(jobId, formattedSegment);
         },
         progress_callback: (progress) => {
-          transcriptionEmitter.emitProgress(jobId, progress);
+          const partProgress: TranscriptionPartProgress = {
+            currentPart: 1,
+            totalParts: 1,
+            partProgress: progress,
+            totalProgress: progress
+          };
+          transcriptionEmitter.emitProgress(jobId, partProgress);
         },
       };
 
-      // 開始轉錄處理
-      whisperService
-        .transcribe(params)
-        .then((result) => {
-          transcriptionEmitter.emitComplete(jobId, result);
-        })
-        .catch((error) => {
-          transcriptionEmitter.emitError(jobId, error);
-        })
-        .finally(async () => {
-          try {
-            if (audioPath) {
-              await fs.unlink(audioPath);
-            }
-            console.log("已清理暫存檔案:", audioPath);
-          } catch (error) {
-            console.error("清理暫存檔案失敗:", error);
-          }
-        });
+      // 轉錄處理
+      const result = await whisperService.transcribe(params);
+      console.log(`完成檔案 ${filePath} 的轉錄`);
+      
+      // 儲存結果
+      if (result.segments) {
+        allSegments.push(...result.segments);
+      }
+
+      // 清理檔案
+      await fs.unlink(filePath);
+      console.log("已清理暫存檔案:", filePath);
+
+      // 合併結果
+      const completeText = allSegments
+        .sort((a, b) => a.start - b.start)
+        .map(segment => segment.text)
+        .join(' ');
+
+      transcriptionEmitter.emitComplete(jobId, {
+        text: completeText,
+        segments: allSegments
+      });
 
     } catch (error) {
       console.error("Youtube 下載或轉錄初始化失敗:", error);
@@ -138,13 +154,15 @@ app.post(
         error: error instanceof Error ? error.message : "未知錯誤",
       });
 
-      if (audioPath) {
-        try {
-          await fs.unlink(audioPath);
-          console.log("已清理暫存檔案:", audioPath);
-        } catch (cleanupError) {
-          console.error("清理暫存檔案失敗:", cleanupError);
-        }
+      // 錯誤發生時，清理所有暫存檔案
+      try {
+        await Promise.all(audioFiles.map(filePath => 
+          fs.unlink(filePath).catch(err => 
+            console.error(`清理檔案 ${filePath} 失敗:`, err)
+          )
+        ));
+      } catch (cleanupError) {
+        console.error("清理暫存檔案失敗:", cleanupError);
       }
     }
   }
@@ -171,7 +189,7 @@ app.post(
 
     try {
       const params: WhisperParams = {
-        language: "en",
+        language: "auto",
         model: join(process.cwd(), "models/ggml-large-v3-turbo.bin"),
         use_gpu: true,
         fname_inp: tempFilePath,
@@ -245,7 +263,7 @@ app.post(
   }
 );
 
-const port = process.env.PORT || 5566;
+const port = process.env.PORT || 8001;
 httpServer.listen(port, () => {
   console.log(`伺服器運行在 http://localhost:${port}`);
 });

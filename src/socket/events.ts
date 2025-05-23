@@ -12,14 +12,38 @@ export const EVENTS = {
     DOWNLOAD_PROGRESS: 'youtube-download-progress',
     DOWNLOAD_COMPLETE: 'youtube-download-complete',
     DOWNLOAD_ERROR: 'youtube-download-error',
-    AUDIO_READY: 'youtube-audio-ready'
+    AUDIO_READY: 'youtube-audio-ready',
+    SEGMENTS_INFO: 'youtube-segments-info',
+    SEGMENT_START: 'youtube-segment-start',
+    SEGMENT_COMPLETE: 'youtube-segment-complete'
   }
 } as const;
 
-export interface TranscriptionProgressData {
+export interface TranscriptionPartProgress {
+  currentPart: number;
+  totalParts: number;
+  partProgress: number;
+  totalProgress: number;  // 總體轉錄進度（百分比）
+}
+
+// 基礎進度介面
+export interface TranscriptionProgressBase {
   jobId: string;
+}
+
+// 單一檔案進度
+export interface TranscriptionSingleProgress extends TranscriptionProgressBase {
+  type: 'single';
   progress: number;
 }
+
+// 分段檔案進度
+export interface TranscriptionMultipartProgress extends TranscriptionProgressBase {
+  type: 'multipart';
+  progress: TranscriptionPartProgress;
+}
+
+export type TranscriptionProgressData = TranscriptionSingleProgress | TranscriptionMultipartProgress;
 
 export interface TranscriptionSegmentData {
   jobId: string;
@@ -49,14 +73,29 @@ export interface TranscriptionErrorData {
   error: string;
 }
 
-export interface YoutubeDownloadProgress {
-  jobId: string;
+export interface YoutubeProgress {
   percent: number;
   speed: string;
   downloaded: number;
 }
 
+export interface YoutubeDownloadProgress extends YoutubeProgress {
+  jobId: string;
+}
+
 export interface YoutubeAudioData {
   jobId: string;
   audioData: string;  // base64 編碼的音檔
+}
+
+export interface YoutubeSegmentsInfo {
+  totalSegments: number;
+  segmentDuration: number;
+  totalDuration: number;
+}
+
+export interface YoutubeSegmentProgress {
+  jobId: string;
+  currentSegment: number;
+  segmentProgress: number;
 }

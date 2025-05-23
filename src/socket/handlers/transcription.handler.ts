@@ -1,5 +1,12 @@
 import { Server, Socket } from 'socket.io';
-import { EVENTS, TranscriptionProgressData, TranscriptionCompleteData, TranscriptionErrorData, TranscriptionSegmentData } from '../events';
+import { 
+  EVENTS, 
+  TranscriptionProgressData, 
+  TranscriptionCompleteData, 
+  TranscriptionErrorData, 
+  TranscriptionSegmentData,
+  TranscriptionPartProgress
+} from '../events';
 import { WhisperParams } from '../../types/whisper.types';
 import { whisperService } from '../../services/whisper.service';
 
@@ -39,6 +46,7 @@ const handleTranscriptionStart = async (socket: Socket, params: Omit<WhisperPara
       ...params,
       progress_callback: (progress: number) => {
         const progressData: TranscriptionProgressData = {
+          type: 'single',
           jobId: socket.id,
           progress
         };
@@ -111,11 +119,22 @@ export const setupTranscriptionHandler = (socket: Socket): void => {
 
 // 導出公共函數供其他模組使用
 export const transcriptionEmitter = {
-  emitProgress: (jobId: string, progress: number): void => {
-    const progressData: TranscriptionProgressData = {
-      jobId,
-      progress
-    };
+  emitProgress: (jobId: string, progress: number | TranscriptionPartProgress): void => {
+    let progressData: TranscriptionProgressData;
+    
+    if (typeof progress === 'number') {
+      progressData = {
+        type: 'single',
+        jobId,
+        progress
+      };
+    } else {
+      progressData = {
+        type: 'multipart',
+        jobId,
+        progress
+      };
+    }
     emitToJob(jobId, EVENTS.TRANSCRIPTION.PROGRESS, progressData);
   },
 
@@ -124,6 +143,7 @@ export const transcriptionEmitter = {
       jobId,
       segment
     };
+    console.log('傳遞逐字稿')
     emitToJob(jobId, EVENTS.TRANSCRIPTION.SEGMENT, segmentData);
   },
 

@@ -1,11 +1,5 @@
-import { EVENTS } from '../events';
+import { EVENTS, YoutubeSegmentsInfo, YoutubeProgress } from '../events';
 import { emitToJob } from './transcription.handler';
-
-export interface YoutubeProgress {
-  percent: number;
-  speed: string;
-  downloaded: number;
-}
 
 // Youtube 事件發射器
 export const youtubeEmitter = {
@@ -31,6 +25,27 @@ export const youtubeEmitter = {
     emitToJob(jobId, EVENTS.YOUTUBE.DOWNLOAD_ERROR, {
       jobId,
       error: error instanceof Error ? error.message : error
+    });
+  },
+
+  emitSegmentsInfo: (jobId: string, info: YoutubeSegmentsInfo): void => {
+    emitToJob(jobId, EVENTS.YOUTUBE.SEGMENTS_INFO, {
+      jobId,
+      ...info
+    });
+  },
+
+  emitSegmentStart: (jobId: string, segmentIndex: number): void => {
+    emitToJob(jobId, EVENTS.YOUTUBE.SEGMENT_START, {
+      jobId,
+      currentSegment: segmentIndex
+    });
+  },
+
+  emitSegmentComplete: (jobId: string, segmentIndex: number): void => {
+    emitToJob(jobId, EVENTS.YOUTUBE.SEGMENT_COMPLETE, {
+      jobId,
+      currentSegment: segmentIndex
     });
   }
 };

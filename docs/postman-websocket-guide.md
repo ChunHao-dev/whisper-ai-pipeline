@@ -41,7 +41,7 @@ Form Data:
 2. 點擊 "New" -> "WebSocket Request"
 3. 輸入連接 URL：
    ```
-   ws://localhost: 5566
+   ws://localhost: 8001
    ```
 4. 點擊 "Connect" 建立連接
 
