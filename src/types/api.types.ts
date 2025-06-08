@@ -12,6 +12,24 @@ export interface YoutubeTranscribeRequest {
   language?: string;
 }
 
+export interface YoutubeToSrtRequest {
+  /** Youtube 影片 URL */
+  url: string;
+  /** 語言（可選） */
+  language?: string;
+}
+
+export interface YoutubeToSrtResponse {
+  /** 任務 ID */
+  jobId: string;
+  /** 任務狀態 */
+  status: 'processing' | 'complete' | 'error';
+  /** SRT 檔案路徑 */
+  srtPath?: string;
+  /** 錯誤訊息（如果有） */
+  error?: string;
+}
+
 export interface TranscribeResponse {
   /** 任務 ID */
   jobId: string;
