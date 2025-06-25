@@ -10,6 +10,8 @@ export interface YoutubeTranscribeRequest {
   url: string;
   /** 語言（可選） */
   language?: string;
+  /** 是否使用 word level 轉錄（可選） */
+  wordLevel?: boolean;
 }
 
 export interface YoutubeToSrtRequest {

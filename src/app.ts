@@ -19,6 +19,7 @@ import {
 } from "./socket/handlers/transcription.handler";
 import { TranscriptionPartProgress } from "./socket/events";
 import { formatTimestamp } from "./utils/time.utils";
+import { combineWordsToSentences, WordSegment, generateSrtFromSentences } from "./utils/sentence.utils";
 
 const app = express();
 const httpServer = createServer(app);
@@ -36,7 +37,7 @@ app.use(express.json());
 const upload = multer({
   dest: "uploads/",
   limits: {
-    fileSize: 100 * 1024 * 1024, // 100MB
+    fileSize: 300 * 1024 * 1024, // 100MB
   },
   fileFilter: (_req, file, cb) => {
     // 檢查檔案類型
@@ -69,11 +70,13 @@ app.post(
     res: Response<TranscribeResponse | ErrorResponse>
   ): Promise<void> => {
     console.log("收到 Youtube 轉錄請求");
-    const { url, language = "en" } = req.body;
+    const { url, language = "en", wordLevel = false } = req.body;
     const jobId = uuidv4();
     let segmentIndex = 1;
     let audioFiles: string[] = [];
     let allSegments: Array<{text: string; start: number; end: number; t0?: number; t1?: number}> = [];
+    let wordSegments: WordSegment[] = []; // 用於存儲 word-level segments
+
     try {
       // 立即回應 jobId，表示任務已開始處理
       res.json({
@@ -99,19 +102,31 @@ app.post(
         translate: false,
         no_timestamps: false,
         audio_ctx: 0,
-        max_len: 0,
+        max_len: wordLevel ? 1 : 0, // word level 模式時設置 max_len: 1
         segment_callback: (segment) => {
           console.log(`---- andy[${formatTimestamp(segment.t0)} --> ${formatTimestamp(segment.t1)}] ${segment.text}`);
-          const formattedSegment = {
-            ...segment,
-            index: segmentIndex++,
-            srtTimestamp: `${formatTimestamp(segment.t0)} --> ${formatTimestamp(segment.t1)}`,
-            startTime: formatTimestamp(segment.t0),
-            endTime: formatTimestamp(segment.t1)
-          };
           
-          console.log(`${formattedSegment.index}\n${formattedSegment.srtTimestamp}\n${segment.text}\n`);
-          transcriptionEmitter.emitSegment(jobId, formattedSegment);
+          if (wordLevel) {
+            // word level 模式：收集 word segments，不發送即時 SRT
+            wordSegments.push({
+              text: segment.text,
+              t0: segment.t0,
+              t1: segment.t1
+            });
+            console.log(`Word collected: ${segment.text}`);
+          } else {
+            // 正常模式：發送即時 SRT
+            const formattedSegment = {
+              ...segment,
+              index: segmentIndex++,
+              srtTimestamp: `${formatTimestamp(segment.t0)} --> ${formatTimestamp(segment.t1)}`,
+              startTime: formatTimestamp(segment.t0),
+              endTime: formatTimestamp(segment.t1)
+            };
+            
+            console.log(`${formattedSegment.index}\n${formattedSegment.srtTimestamp}\n${segment.text}\n`);
+            transcriptionEmitter.emitSegment(jobId, formattedSegment);
+          }
         },
         progress_callback: (progress) => {
           const partProgress: TranscriptionPartProgress = {
@@ -128,25 +143,49 @@ app.post(
       const result = await whisperService.transcribe(params);
       console.log(`完成檔案 ${filePath} 的轉錄`);
       
-      // 儲存結果
-      if (result.segments) {
-        allSegments.push(...result.segments);
+      if (wordLevel) {
+        // word level 模式：將 words 組合成句子
+        console.log(`總共收集到 ${wordSegments.length} 個 word segments`);
+        const sentences = combineWordsToSentences(wordSegments);
+        console.log(`組合成 ${sentences.length} 個句子`);
+        
+        // 發送句子級別的 segments
+        sentences.forEach((sentence) => {
+          transcriptionEmitter.emitSegment(jobId, sentence);
+        });
+
+        // 準備最終結果
+        const completeText = sentences.map(s => s.text).join(' ');
+        const finalSegments = sentences.map(s => ({
+          text: s.text,
+          start: s.start,
+          end: s.end
+        }));
+
+        transcriptionEmitter.emitComplete(jobId, {
+          text: completeText,
+          segments: finalSegments
+        });
+      } else {
+        // 正常模式：處理原有邏輯
+        if (result.segments) {
+          allSegments.push(...result.segments);
+        }
+
+        const completeText = allSegments
+          .sort((a, b) => a.start - b.start)
+          .map(segment => segment.text)
+          .join(' ');
+
+        transcriptionEmitter.emitComplete(jobId, {
+          text: completeText,
+          segments: allSegments
+        });
       }
 
       // 清理檔案
       await fs.unlink(filePath);
       console.log("已清理暫存檔案:", filePath);
-
-      // 合併結果
-      const completeText = allSegments
-        .sort((a, b) => a.start - b.start)
-        .map(segment => segment.text)
-        .join(' ');
-
-      transcriptionEmitter.emitComplete(jobId, {
-        text: completeText,
-        segments: allSegments
-      });
 
     } catch (error) {
       console.error("Youtube 下載或轉錄初始化失敗:", error);
