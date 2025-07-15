@@ -390,3 +390,7 @@ const port = process.env.PORT || 8001;
 httpServer.listen(port, () => {
   console.log(`伺服器運行在 http://localhost:${port}`);
 });
+
+// Start the SQS polling service
+import { startSqsPolling } from "./services/sqs.service";
+startSqsPolling();
