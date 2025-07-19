@@ -88,8 +88,8 @@ app.post(
       });
 
       // 下載並處理 Youtube 音檔
-      const downloadedFiles = await downloadAndProcessYoutube(url, jobId);
-      audioFiles = downloadedFiles;
+      const downloadResult = await downloadAndProcessYoutube(url, jobId);
+      audioFiles = downloadResult.audioFiles;
 
       const filePath = audioFiles[0];
       
@@ -329,8 +329,8 @@ app.post(
       });
 
       // 下載 Youtube 音訊
-      const downloadedFiles = await downloadAndProcessYoutube(url, jobId);
-      audioFiles = downloadedFiles;
+      const downloadResult = await downloadAndProcessYoutube(url, jobId);
+      audioFiles = downloadResult.audioFiles;
       const filePath = audioFiles[0];
       const absoluteFilePath = join(process.cwd(), filePath);
       console.log("下載的音訊檔案絕對路徑:", absoluteFilePath);

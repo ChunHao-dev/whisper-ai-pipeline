@@ -99,12 +99,22 @@ async function processQueue(): Promise<void> {
       let audioFilePath: string | undefined;
 
       try {
-        // 1. Download Audio
+        // 1. Download Audio and get video info
         console.log(`[${jobId}] Starting download for ${videoUrl}`);
-        const downloadedFiles = await downloadAndProcessYoutube(videoUrl, jobId);
-        audioFilePath = downloadedFiles[0];
+        const downloadResult = await downloadAndProcessYoutube(videoUrl, jobId);
+        audioFilePath = downloadResult.audioFiles[0];
+        const videoInfo = downloadResult.videoInfo;
         console.log(`[${jobId}] Audio downloaded successfully to: ${audioFilePath}`);
 
+        // 1.1. Upload video metadata to R2
+        console.log(`[${jobId}] Uploading video metadata to R2...`);
+        const metadataUploadResult = await r2Service.uploadVideoMetadataToR2(videoInfo);
+        if (metadataUploadResult.success) {
+          console.log(`[${jobId}] Successfully uploaded video metadata to R2: ${metadataUploadResult.note}`);
+        } else {
+          console.error(`[${jobId}] Failed to upload video metadata to R2:`, metadataUploadResult.error);
+        }
+        
         // 2. Transcribe Audio (Word-Level)
         const wordSegments: WordSegment[] = [];
         const params: WhisperParams = {
@@ -129,7 +139,7 @@ async function processQueue(): Promise<void> {
               t1: segment.t1,
             });
           },
-          progress_callback: (progress) => {
+          progress_callback: (_progress) => {
           },
         };
 

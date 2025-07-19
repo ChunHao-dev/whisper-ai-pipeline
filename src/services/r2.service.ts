@@ -1,6 +1,7 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
+import path from 'path';
 
 const execPromise = promisify(exec);
 
@@ -8,6 +9,7 @@ interface R2UploadResult {
   success: boolean;
   error?: string;
   remotePath?: string;
+  note?: string;
 }
 
 /**
@@ -143,9 +145,151 @@ function normalizeLanguageCode(language: string): string {
   return 'default';
 }
 
+/**
+ * Downloads a file from URL to local path
+ * @param url - URL to download from
+ * @param localPath - Local path to save the file
+ * @returns Promise<boolean> - Success status
+ */
+async function downloadFile(url: string, localPath: string): Promise<boolean> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const buffer = await response.arrayBuffer();
+    await fs.writeFile(localPath, Buffer.from(buffer));
+    return true;
+  } catch (error) {
+    console.error(`[R2] Failed to download file from ${url}:`, error);
+    return false;
+  }
+}
+
+/**
+ * Uploads video metadata to R2
+ * @param videoInfo - Video information object
+ * @param bucketName - R2 bucket name (defaults to environment variable)
+ * @returns Promise with upload result
+ */
+export async function uploadVideoMetadataToR2(
+  videoInfo: {
+    duration: number;
+    title: string;
+    id: string;
+    thumbnail?: string;
+    description?: string;
+    uploader?: string;
+    upload_date?: string;
+    view_count?: number;
+    webpage_url?: string;
+  },
+  bucketName?: string
+): Promise<R2UploadResult> {
+  try {
+    // Validate input
+    if (!videoInfo || !videoInfo.id) {
+      throw new Error('Video info and video ID are required');
+    }
+
+    // Use environment variable if bucket name not provided
+    const bucket = bucketName || process.env.R2_BUCKET_NAME;
+    if (!bucket) {
+      throw new Error('R2 bucket name must be provided or set in R2_BUCKET_NAME environment variable');
+    }
+
+    const videoId = videoInfo.id;
+    const tempDir = path.join(process.cwd(), 'uploads');
+    
+    // Create metadata JSON file
+    const metadataPath = path.join(tempDir, `${videoId}-metadata.json`);
+    const metadata = {
+      ...videoInfo,
+      generated_at: new Date().toISOString(),
+      generator: 'NodeWhisperCPP'
+    };
+    
+    await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2), 'utf-8');
+    console.log(`[R2] Created metadata file: ${metadataPath}`);
+
+    // Upload metadata JSON
+    const metadataRemotePath = `s3://${bucket}/${videoId}/metadata/info.json`;
+    const metadataCommand = `aws --profile cloudflare s3 cp "${metadataPath}" "${metadataRemotePath}"`;
+    
+    console.log(`[R2] Uploading metadata: ${metadataPath} -> ${metadataRemotePath}`);
+    
+    const { stdout: metadataStdout, stderr: metadataStderr } = await execPromise(metadataCommand);
+    
+    if (metadataStdout) {
+      console.log(`[R2] Metadata upload stdout: ${metadataStdout}`);
+    }
+    if (metadataStderr) {
+      console.log(`[R2] Metadata upload stderr: ${metadataStderr}`);
+    }
+
+    // Handle thumbnail if available
+    let thumbnailUploadSuccess = true;
+    if (videoInfo.thumbnail) {
+      const thumbnailExtension = path.extname(new URL(videoInfo.thumbnail).pathname) || '.jpg';
+      const thumbnailPath = path.join(tempDir, `${videoId}-thumbnail${thumbnailExtension}`);
+      
+      console.log(`[R2] Downloading thumbnail from: ${videoInfo.thumbnail}`);
+      const downloadSuccess = await downloadFile(videoInfo.thumbnail, thumbnailPath);
+      
+      if (downloadSuccess) {
+        const thumbnailRemotePath = `s3://${bucket}/${videoId}/metadata/thumbnail${thumbnailExtension}`;
+        const thumbnailCommand = `aws --profile cloudflare s3 cp "${thumbnailPath}" "${thumbnailRemotePath}"`;
+        
+        console.log(`[R2] Uploading thumbnail: ${thumbnailPath} -> ${thumbnailRemotePath}`);
+        
+        try {
+          const { stdout: thumbStdout, stderr: thumbStderr } = await execPromise(thumbnailCommand);
+          
+          if (thumbStdout) {
+            console.log(`[R2] Thumbnail upload stdout: ${thumbStdout}`);
+          }
+          if (thumbStderr) {
+            console.log(`[R2] Thumbnail upload stderr: ${thumbStderr}`);
+          }
+          
+          // Clean up local thumbnail file
+          await fs.unlink(thumbnailPath);
+        } catch (thumbError) {
+          console.error(`[R2] Failed to upload thumbnail:`, thumbError);
+          thumbnailUploadSuccess = false;
+        }
+      } else {
+        thumbnailUploadSuccess = false;
+      }
+    }
+
+    // Clean up local metadata file
+    await fs.unlink(metadataPath);
+    
+    console.log(`[R2] Successfully uploaded metadata for ${videoId}`);
+    
+    return {
+      success: true,
+      remotePath: metadataRemotePath,
+      note: thumbnailUploadSuccess ? 'Both metadata and thumbnail uploaded' : 'Metadata uploaded, thumbnail failed'
+    };
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error(`[R2] Upload metadata failed for ${videoInfo?.id || 'unknown'}:`, errorMessage);
+    
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
 // Export the R2 service
 export const r2Service = {
   uploadSrtToR2,
+  uploadVideoMetadataToR2,
   getFileSize,
   formatFileSize
 };

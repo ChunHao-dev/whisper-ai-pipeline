@@ -7,6 +7,12 @@ interface VideoInfo {
   duration: number;
   title: string;
   id: string;
+  thumbnail?: string;
+  description?: string;
+  uploader?: string;
+  upload_date?: string;
+  view_count?: number;
+  webpage_url?: string;
 }
 
 /**
@@ -114,7 +120,13 @@ async function getVideoInfoWithCookies(url: string): Promise<VideoInfo> {
       return {
         duration: jsonResult.duration,
         title: jsonResult.title,
-        id: jsonResult.id
+        id: jsonResult.id,
+        thumbnail: jsonResult.thumbnail,
+        description: jsonResult.description,
+        uploader: jsonResult.uploader,
+        upload_date: jsonResult.upload_date,
+        view_count: jsonResult.view_count,
+        webpage_url: jsonResult.webpage_url
       };
     } catch (error) {
       console.error(`使用 ${browser} 瀏覽器失敗:`, error instanceof Error ? error.message : error);
@@ -161,7 +173,13 @@ async function getVideoInfoWithUserAgent(url: string): Promise<VideoInfo> {
       return {
         duration: jsonResult.duration,
         title: jsonResult.title,
-        id: jsonResult.id
+        id: jsonResult.id,
+        thumbnail: jsonResult.thumbnail,
+        description: jsonResult.description,
+        uploader: jsonResult.uploader,
+        upload_date: jsonResult.upload_date,
+        view_count: jsonResult.view_count,
+        webpage_url: jsonResult.webpage_url
       };
     } catch (error) {
       console.error('用戶代理偽裝失敗:', error instanceof Error ? error.message : error);
@@ -198,7 +216,13 @@ async function getVideoInfoBasic(url: string): Promise<VideoInfo> {
   return {
     duration: jsonResult.duration,
     title: jsonResult.title,
-    id: jsonResult.id
+    id: jsonResult.id,
+    thumbnail: jsonResult.thumbnail,
+    description: jsonResult.description,
+    uploader: jsonResult.uploader,
+    upload_date: jsonResult.upload_date,
+    view_count: jsonResult.view_count,
+    webpage_url: jsonResult.webpage_url
   };
 }
 
@@ -209,7 +233,7 @@ async function getVideoInfoBasic(url: string): Promise<VideoInfo> {
 export const downloadAndProcessYoutube = async (
   url: string,
   jobId: string
-): Promise<string[]> => {
+): Promise<{ audioFiles: string[]; videoInfo: VideoInfo }> => {
   try {
     // 1. 獲取影片資訊
     const info = await getVideoInfo(url);
@@ -236,8 +260,11 @@ export const downloadAndProcessYoutube = async (
     youtubeEmitter.emitSegmentComplete(jobId, 1);
     youtubeEmitter.emitDownloadComplete(jobId);
 
-    // 返回音檔路徑 (為了與原有介面相容，包裝成陣列)
-    return [outputPath];
+    // 返回音檔路徑和影片資訊
+    return {
+      audioFiles: [outputPath],
+      videoInfo: info
+    };
   } catch (error) {
     // 提供更明確的錯誤訊息和解決建議
     const errorMessage = error instanceof Error ? error.message : "下載過程中發生未知錯誤";
