@@ -23,6 +23,7 @@ import {
 import { TranscriptionPartProgress } from "./socket/events";
 import { formatTimestamp } from "./utils/time.utils";
 import { combineWordsToSentences, WordSegment, generateSrtFromSentences } from "./utils/sentence.utils";
+import { mlxWhisperService, MLXWhisperResult, MLXTranscriptionResult } from "./services/mlx-whisper.service";
 
 const app = express();
 const httpServer = createServer(app);
@@ -107,7 +108,7 @@ app.post(
         audio_ctx: 0,
         max_len: wordLevel ? 1 : 0, // word level 模式時設置 max_len: 1
         segment_callback: (segment) => {
-          console.log(`---- andy[${formatTimestamp(segment.t0)} --> ${formatTimestamp(segment.t1)}] ${segment.text}`);
+          // console.log(`---- andy[${formatTimestamp(segment.t0)} --> ${formatTimestamp(segment.t1)}] ${segment.text}`);
           
           if (wordLevel) {
             // word level 模式：收集 word segments，不發送即時 SRT
@@ -116,7 +117,7 @@ app.post(
               t0: segment.t0,
               t1: segment.t1
             });
-            console.log(`Word collected: ${segment.text}`);
+            // console.log(`Word collected: ${segment.text}`);
           } else {
             // 正常模式：發送即時 SRT
             const formattedSegment = {
@@ -388,6 +389,190 @@ app.post(
     }
   }
 );
+
+// MLX Whisper 轉錄 API（支援逐字時間戳）
+app.post(
+  "/api/transcribe-mlx",
+  upload.single("audio"),
+  async (
+    req: Request,
+    res: Response<TranscribeResponse | ErrorResponse>
+  ): Promise<void> => {
+    console.log("收到 MLX Whisper 轉錄請求");
+    
+    if (!req.file) {
+      res.status(400).json({ error: "必須提供音檔" });
+      return;
+    }
+
+    const tempFilePath = req.file.path;
+    const jobId = uuidv4();
+    const { language, model } = req.body;
+
+    try {
+      // 立即回應 jobId，表示任務已開始處理
+      res.json({
+        jobId,
+        status: "processing",
+      });
+
+      // 非同步處理轉錄任務
+      mlxWhisperService
+        .processTranscription(tempFilePath, {
+          language: language || undefined,
+          model: model || undefined,
+          saveSrt: true,
+          outputDir: join(process.cwd(), "uploads")
+        })
+        .then((result: MLXTranscriptionResult) => {
+          if (result.success) {
+            transcriptionEmitter.emitComplete(jobId, {
+              jobId,
+              status: "complete",
+              text: result.text,
+              segments: result.segments,
+              sentences: result.sentences,
+              language: result.language,
+              srtPath: result.srtPath,
+              srtContent: result.srtContent
+            });
+          } else {
+            transcriptionEmitter.emitError(jobId, result.error || "轉錄處理失敗");
+          }
+        })
+        .catch((error) => {
+          transcriptionEmitter.emitError(jobId, error instanceof Error ? error.message : "未知錯誤");
+        })
+        .finally(async () => {
+          try {
+            await fs.unlink(tempFilePath);
+            console.log("已清理暫存檔案:", tempFilePath);
+          } catch (error) {
+            console.error("清理暫存檔案失敗:", error);
+          }
+        });
+    } catch (error) {
+      console.error("MLX Whisper 轉錄初始化失敗:", error);
+      res.status(500).json({
+        jobId,
+        status: "error",
+        error: error instanceof Error ? error.message : "未知錯誤",
+      });
+
+      // 清理暫存檔案
+      try {
+        await fs.unlink(tempFilePath);
+      } catch (cleanupError) {
+        console.error("清理暫存檔案失敗:", cleanupError);
+      }
+    }
+  }
+);
+
+// MLX Whisper YouTube 轉錄 API（支援逐字時間戳）
+app.post(
+  "/api/transcribe-youtube-mlx",
+  async (
+    req: Request,
+    res: Response<TranscribeResponse | ErrorResponse>
+  ): Promise<void> => {
+    const { url, language, model } = req.body;
+    const jobId = uuidv4();
+    let audioFiles: string[] = [];
+
+    try {
+      if (!url) {
+        res.status(400).json({ error: "必須提供 YouTube URL" });
+        return;
+      }
+
+      // 立即回應 jobId
+      res.json({
+        jobId,
+        status: "processing",
+      });
+
+      // 下載 Youtube 音訊
+      const downloadResult = await downloadAndProcessYoutube(url, jobId);
+      audioFiles = downloadResult.audioFiles;
+      const filePath = audioFiles[0];
+      const absoluteFilePath = join(process.cwd(), filePath);
+      
+      console.log("使用 MLX Whisper 轉錄 YouTube:", absoluteFilePath);
+
+      // 使用 MLX Whisper 完整處理（包含 word-level 重組和 SRT 生成）
+      const result = await mlxWhisperService.processTranscription(absoluteFilePath, {
+        language: language || undefined,
+        model: model || undefined,
+        saveSrt: true,
+        outputDir: join(process.cwd(), "uploads")
+      });
+
+      // 清理音訊檔案
+      await fs.unlink(absoluteFilePath);
+      console.log("已清理音訊檔案:", absoluteFilePath);
+
+      if (result.success) {
+        // 發送完成結果
+        transcriptionEmitter.emitComplete(jobId, {
+          jobId,
+          status: "complete",
+          text: result.text,
+          segments: result.segments,
+          sentences: result.sentences,
+          language: result.language,
+          srtPath: result.srtPath,
+          srtContent: result.srtContent
+        });
+      } else {
+        transcriptionEmitter.emitError(jobId, result.error || "轉錄處理失敗");
+      }
+
+    } catch (error) {
+      console.error("MLX Whisper YouTube 轉錄失敗:", error);
+      transcriptionEmitter.emitError(jobId, error instanceof Error ? error.message : "未知錯誤");
+
+      // 錯誤發生時，清理所有暫存檔案
+      try {
+        await Promise.all(audioFiles.map(filePath => {
+          const absolutePath = join(process.cwd(), filePath);
+          return fs.unlink(absolutePath).catch(err => 
+            console.error(`清理檔案 ${absolutePath} 失敗:`, err)
+          );
+        }));
+      } catch (cleanupError) {
+        console.error("清理暫存檔案失敗:", cleanupError);
+      }
+    }
+  }
+);
+
+// MLX Whisper 健康檢查 API
+app.get("/api/mlx-health", async (req: Request, res: Response) => {
+  try {
+    const healthCheck = await mlxWhisperService.checkEnvironment();
+    
+    if (healthCheck.available) {
+      res.json({
+        status: "healthy",
+        service: "MLX Whisper",
+        message: "MLX Whisper 服務可用"
+      });
+    } else {
+      res.status(503).json({
+        status: "unhealthy",
+        service: "MLX Whisper",
+        error: healthCheck.error
+      });
+    }
+  } catch (error) {
+    res.status(503).json({
+      status: "unhealthy",
+      service: "MLX Whisper",
+      error: error instanceof Error ? error.message : "未知錯誤"
+    });
+  }
+});
 
 const port = process.env.PORT || 8001;
 httpServer.listen(port, () => {

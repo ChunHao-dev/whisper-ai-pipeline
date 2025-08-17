@@ -113,3 +113,25 @@ export function generateSrtFromSentences(sentences: SentenceSegment[]): string {
     )
     .join('\n');
 }
+
+/**
+ * 將 normal 模式的 segments 直接轉換為 SRT 格式
+ */
+export function generateSrtFromSegments(segments: Array<{text: string; start: number; end: number}>): string {
+  console.log(`[SRT] Processing ${segments.length} segments for SRT generation`);
+  
+  if (!segments || segments.length === 0) {
+    console.warn('[SRT] No segments provided, returning empty SRT');
+    return '';
+  }
+  
+  const srtContent = segments
+    .map((segment, index) => {
+      console.log(`[SRT] Segment ${index + 1}: "${segment.text}" (${segment.start} - ${segment.end})`);
+      return `${index + 1}\n${formatTimestamp(segment.start)} --> ${formatTimestamp(segment.end)}\n${segment.text.trim()}\n`;
+    })
+    .join('\n');
+    
+  console.log(`[SRT] Generated SRT content length: ${srtContent.length}`);
+  return srtContent;
+}

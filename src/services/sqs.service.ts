@@ -5,9 +5,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { downloadAndProcessYoutube } from '../utils/youtube.utils';
 import { whisperService } from './whisper.service';
 import { WhisperParams } from '../types/whisper.types';
-import { WordSegment, combineWordsToSentences, generateSrtFromSentences } from '../utils/sentence.utils';
+import { WordSegment, combineWordsToSentences, generateSrtFromSentences, generateSrtFromSegments } from '../utils/sentence.utils';
 import { youtubeEmitter } from '../socket/handlers/youtube.handler';
 import { r2Service } from './r2.service';
+import { videoListService } from './videolist.service';
 
 const DEQUEUE_URL = 'https://n0fa1a9zo2.execute-api.ap-southeast-2.amazonaws.com/dequeue';
 const LONG_POLLING_INTERVAL = 10 * 60 * 1000; // 10 minutes
@@ -115,12 +116,9 @@ async function processQueue(): Promise<void> {
           console.error(`[${jobId}] Failed to upload video metadata to R2:`, metadataUploadResult.error);
         }
         
-        // 2. Transcribe Audio (Word-Level)
-        const wordSegments: WordSegment[] = [];
+        // 2. Transcribe Audio (Normal Mode)
+        const allSegments: Array<{text: string; start: number; end: number}> = [];
         const params: WhisperParams = {
-
-          
-          
           language: 'auto',
           model: path.join(process.cwd(), 'models/ggml-large-v3-turbo.bin'),
           use_gpu: true,
@@ -131,26 +129,30 @@ async function processQueue(): Promise<void> {
           translate: false,
           no_timestamps: false,
           audio_ctx: 0,
-          max_len: 1, // Enable word-level timestamps
+          max_len: 0, // Normal mode for accurate transcription
           segment_callback: (segment) => {
-            wordSegments.push({
+            allSegments.push({
               text: segment.text,
-              t0: segment.t0,
-              t1: segment.t1,
+              start: segment.t0,
+              end: segment.t1
             });
-          },
-          progress_callback: (_progress) => {
           },
         };
 
         console.log(`[${jobId}] Starting transcription...`);
-        await whisperService.transcribe(params);
-        console.log(`[${jobId}] Transcription finished. Collected ${wordSegments.length} word segments.`);
+        const result = await whisperService.transcribe(params);
+        console.log(`[${jobId}] Transcription finished. Collected ${allSegments.length} segments via callback.`);
+        
+        // Debug: Check collected segments
+        console.log(`[${jobId}] Collected segments:`, {
+          segmentCount: allSegments.length,
+          firstSegment: allSegments[0] || 'No segments',
+          totalText: allSegments.map(s => s.text).join(' ').substring(0, 100) + '...'
+        });
 
-        // 3. Combine words and generate SRT
-        const sentences = combineWordsToSentences(wordSegments);
-        const srtContent = generateSrtFromSentences(sentences);
-        console.log(`[${jobId}] Generated ${sentences.length} sentences.`);
+        // 3. Generate SRT from collected segments
+        const srtContent = generateSrtFromSegments(allSegments);
+        console.log(`[${jobId}] Generated SRT content length: ${srtContent.length}`);
 
         // 4. Save SRT file
         const srtOutputPath = path.join(process.cwd(), 'uploads', `${videoId}.srt`);
@@ -166,6 +168,30 @@ async function processQueue(): Promise<void> {
         const uploadResult = await r2Service.uploadSrtToR2(srtOutputPath, videoId, params.language);
         if (uploadResult.success) {
           console.log(`[${jobId}] Successfully uploaded ${videoId}.srt to R2: ${uploadResult.remotePath}`);
+          
+          // 6. Update VideoList.json
+          try {
+            console.log(`[${jobId}] Updating VideoList.json...`);
+            
+            const addResult = await videoListService.addVideoToList(videoInfo);
+            
+            if (addResult.success && addResult.data) {
+              console.log(`[${jobId}] Successfully added video to VideoList`);
+              
+              // Upload updated VideoList to R2
+              const uploadListResult = await videoListService.uploadVideoListToR2(addResult.data);
+              if (uploadListResult.success) {
+                console.log(`[${jobId}] Successfully uploaded updated VideoList.json to R2`);
+              } else {
+                console.error(`[${jobId}] Failed to upload VideoList.json to R2:`, uploadListResult.error);
+              }
+            } else {
+              console.error(`[${jobId}] Failed to update VideoList:`, addResult.error);
+            }
+          } catch (videoListError) {
+            console.error(`[${jobId}] VideoList update failed:`, videoListError);
+            // VideoList 更新失敗不影響 SRT 上傳成功的狀態
+          }
           
           // Delete local SRT file after successful upload
           try {
@@ -183,7 +209,7 @@ async function processQueue(): Promise<void> {
         console.error(`[${jobId}] Failed to process video ID ${videoId}:`, jobError);
         youtubeEmitter.emitError(jobId, jobError instanceof Error ? jobError : new Error('Unknown processing error'));
       } finally {
-        // 6. Cleanup
+        // 7. Cleanup
         if (audioFilePath) {
           try {
             await fs.unlink(audioFilePath);

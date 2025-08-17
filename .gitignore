@@ -14,6 +14,9 @@ package-lock.json
 models/
 Release/
 
+# Uploads directory
+uploads/
+
 # Build output
 dist/
 build/

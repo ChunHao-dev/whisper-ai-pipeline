@@ -231,17 +231,23 @@ export async function uploadVideoMetadataToR2(
     // Handle thumbnail if available
     let thumbnailUploadSuccess = true;
     if (videoInfo.thumbnail) {
-      const thumbnailExtension = path.extname(new URL(videoInfo.thumbnail).pathname) || '.jpg';
-      const thumbnailPath = path.join(tempDir, `${videoId}-thumbnail${thumbnailExtension}`);
+      // Convert YouTube thumbnail URL to WebP format
+      let thumbnailUrl = videoInfo.thumbnail;
+      if (thumbnailUrl.includes('i.ytimg.com')) {
+        thumbnailUrl = thumbnailUrl.replace(/\.jpg$/i, '.webp');
+        console.log(`[R2] Converted YouTube thumbnail to WebP: ${thumbnailUrl}`);
+      }
       
-      console.log(`[R2] Downloading thumbnail from: ${videoInfo.thumbnail}`);
-      const downloadSuccess = await downloadFile(videoInfo.thumbnail, thumbnailPath);
+      const thumbnailPath = path.join(tempDir, `${videoId}-thumbnail.webp`);
+      
+      console.log(`[R2] Downloading thumbnail from: ${thumbnailUrl}`);
+      const downloadSuccess = await downloadFile(thumbnailUrl, thumbnailPath);
       
       if (downloadSuccess) {
-        const thumbnailRemotePath = `s3://${bucket}/${videoId}/metadata/thumbnail${thumbnailExtension}`;
+        const thumbnailRemotePath = `s3://${bucket}/${videoId}/metadata/thumbnail.webp`;
         const thumbnailCommand = `aws --profile cloudflare s3 cp "${thumbnailPath}" "${thumbnailRemotePath}"`;
         
-        console.log(`[R2] Uploading thumbnail: ${thumbnailPath} -> ${thumbnailRemotePath}`);
+        console.log(`[R2] Uploading WebP thumbnail: ${thumbnailPath} -> ${thumbnailRemotePath}`);
         
         try {
           const { stdout: thumbStdout, stderr: thumbStderr } = await execPromise(thumbnailCommand);
