@@ -62,358 +62,355 @@ export interface MLXWhisperOptions {
   outputFile?: string;
 }
 
-/**
- * MLX Whisper 服務類別
- * 通過 Python 子進程調用 MLX Whisper 進行語音轉錄
- */
-export class MLXWhisperService {
-  private readonly pythonPath: string;
-  private readonly scriptPath: string;
-  private readonly venvPath: string;
-
-  constructor() {
-    this.venvPath = join(__dirname, '../../.venv');
-    this.pythonPath = join(this.venvPath, 'bin', 'python');
-    this.scriptPath = join(__dirname, '../../scripts/mlx_whisper_wrapper.py');
-  }
-
-  /**
-   * 轉錄音頻檔案並返回逐字時間戳
-   */
-  async transcribeWithWordTimestamps(
-    audioPath: string,
-    options: MLXWhisperOptions = {}
-  ): Promise<MLXWhisperResult> {
-    const {
-      model = 'mlx-community/whisper-large-v3-turbo',
-      language,
-      outputFile
-    } = options;
-
-    try {
-      // 檢查音頻檔案是否存在
-      await fs.access(audioPath);
-
-      // 構建命令參數
-      const args = [this.scriptPath, audioPath, '--model', model];
-      
-      if (language) {
-        args.push('--language', language);
-      }
-      
-      if (outputFile) {
-        args.push('--output', outputFile);
-      }
-
-      console.log(`執行 MLX Whisper 轉錄: ${audioPath}`);
-      console.log(`使用模型: ${model}`);
-      if (language) {
-        console.log(`指定語言: ${language}`);
-      }
-
-      const result = await this.executePythonScript(args);
-      
-      if (result.error) {
-        throw new Error(result.error);
-      }
-
-      if (!result.success || !result.result) {
-        throw new Error('轉錄失敗：未收到有效結果');
-      }
-
-      console.log('MLX Whisper 轉錄完成');
-      return result.result;
-
-    } catch (error) {
-      console.error('MLX Whisper 轉錄錯誤:', error);
-      throw new Error(`MLX Whisper 轉錄失敗: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  /**
-   * 檢查 MLX Whisper 環境是否可用
-   */
-  async checkEnvironment(): Promise<{ available: boolean; error?: string }> {
-    try {
-      // 檢查 Python 路徑
-      await fs.access(this.pythonPath);
-      
-      // 檢查腳本檔案
-      await fs.access(this.scriptPath);
-      
-      // 簡單測試：執行 Python 腳本但不提供音頻檔案
-      const testResult = await this.executePythonScript(['--help'], { timeout: 5000 });
-      
-      return { available: true };
-    } catch (error) {
-      return {
-        available: false,
-        error: `MLX Whisper 環境不可用: ${error instanceof Error ? error.message : String(error)}`
-      };
-    }
-  }
-
-  /**
-   * 執行 Python 腳本
-   */
-  private async executePythonScript(
-    args: string[],
-    options: { timeout?: number } = {}
-  ): Promise<MLXWhisperResponse> {
-    const { timeout = 300000 } = options; // 5分鐘預設超時
-
-    return new Promise((resolve, reject) => {
-      const process = spawn(this.pythonPath, args, {
-        cwd: join(__dirname, '../..'),
-        env: {
-          ...process.env,
-          PYTHONPATH: join(this.venvPath, 'lib/python3.11/site-packages')
-        }
-      });
-
-      let stdout = '';
-      let stderr = '';
-
-      process.stdout.on('data', (data) => {
-        stdout += data.toString();
-      });
-
-      process.stderr.on('data', (data) => {
-        stderr += data.toString();
-      });
-
-      const timeoutId = setTimeout(() => {
-        process.kill('SIGTERM');
-        reject(new Error(`執行超時 (${timeout}ms)`));
-      }, timeout);
-
-      process.on('close', (code) => {
-        clearTimeout(timeoutId);
-
-        if (code !== 0) {
-          console.error('Python 腳本執行錯誤:', stderr);
-          reject(new Error(`Python 腳本執行失敗 (exit code: ${code}): ${stderr}`));
-          return;
-        }
-
-        try {
-          const result = JSON.parse(stdout) as MLXWhisperResponse;
-          resolve(result);
-        } catch (parseError) {
-          console.error('解析 JSON 結果失敗:', stdout);
-          reject(new Error(`解析結果失敗: ${parseError instanceof Error ? parseError.message : String(parseError)}`));
-        }
-      });
-
-      process.on('error', (error) => {
-        clearTimeout(timeoutId);
-        reject(new Error(`啟動 Python 進程失敗: ${error.message}`));
-      });
-    });
-  }
-
-  /**
-   * 將 MLX Whisper 結果轉換為 SRT 格式
-   */
-  generateSRT(result: MLXWhisperResult): string {
-    const srtLines: string[] = [];
-
-    result.segments.forEach((segment, index) => {
-      const startTime = this.formatTime(segment.start);
-      const endTime = this.formatTime(segment.end);
-      
-      srtLines.push(`${index + 1}`);
-      srtLines.push(`${startTime} --> ${endTime}`);
-      srtLines.push(segment.text.trim());
-      srtLines.push('');
-    });
-
-    return srtLines.join('\n');
-  }
-
-  /**
-   * 格式化時間為 SRT 格式 (HH:MM:SS,mmm)
-   */
-  private formatTime(seconds: number): string {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
-    const milliseconds = Math.floor((seconds % 1) * 1000);
-
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')},${milliseconds.toString().padStart(3, '0')}`;
-  }
-
-  /**
-   * 將 word-level segments 組合成完整句子
-   */
-  private combineWordsToSentences(wordSegments: WordSegment[]): SentenceSegment[] {
-    if (!wordSegments.length) {
-      return [];
-    }
-
-    const sentences: SentenceSegment[] = [];
-    let currentWords: WordSegment[] = [];
-    let sentenceIndex = 1;
-
-    // 句子結束標點
-    const sentenceEndPunctuation = '.!?。！？；;';
-    // 停頓標點（不結束句子）
-    const pausePunctuation = ',，、';
-
-    for (let i = 0; i < wordSegments.length; i++) {
-      const wordSegment = wordSegments[i];
-      
-      // 跳過空白的 segments
-      if (!wordSegment.text.trim()) {
-        continue;
-      }
-
-      currentWords.push(wordSegment);
-
-      // 檢查是否需要結束當前句子
-      let shouldEndSentence = false;
-
-      // 檢查句子結束標點
-      if (sentenceEndPunctuation.split('').some(punct => wordSegment.text.includes(punct))) {
-        shouldEndSentence = true;
-      }
-
-      // 如果是最後一個詞，也要結束句子
-      if (i === wordSegments.length - 1) {
-        shouldEndSentence = true;
-      }
-
-      if (shouldEndSentence && currentWords.length > 0) {
-        // 建立句子
-        const sentenceText = currentWords.map(word => word.text).join(' ')
-          .replace(/\s+/g, ' ').trim();
-
-        const startTime = currentWords[0].t0;
-        const endTime = currentWords[currentWords.length - 1].t1;
-
-        const startTimeStr = this.formatTime(startTime);
-        const endTimeStr = this.formatTime(endTime);
-        const srtTimestamp = `${startTimeStr} --> ${endTimeStr}`;
-
-        const sentence: SentenceSegment = {
-          text: sentenceText,
-          start: startTime,
-          end: endTime,
-          index: sentenceIndex,
-          srt_timestamp: srtTimestamp,
-          start_time: startTimeStr,
-          end_time: endTimeStr
-        };
-
-        sentences.push(sentence);
-        sentenceIndex++;
-        currentWords = [];
-      }
-    }
-
-    return sentences;
-  }
-
-  /**
-   * 將句子轉換為標準 SRT 字幕格式
-   */
-  private generateSrtFromSentences(sentences: SentenceSegment[]): string {
-    const srtContent: string[] = [];
-
-    for (const sentence of sentences) {
-      srtContent.push(sentence.index.toString());
-      srtContent.push(sentence.srt_timestamp);
-      srtContent.push(sentence.text);
-      srtContent.push(''); // 空行分隔
-    }
-
-    return srtContent.join('\n');
-  }
-
-  /**
-   * 完整的 MLX Whisper 轉錄處理（包含 word-level 重組和 SRT 生成）
-   * 可用於 API 和 SQS 處理
-   */
-  async processTranscription(
-    audioPath: string,
-    options: MLXWhisperOptions & { saveSrt?: boolean; outputDir?: string } = {}
-  ): Promise<MLXTranscriptionResult> {
-    const {
-      model = 'mlx-community/whisper-large-v3-turbo',
-      language,
-      saveSrt = true,
-      outputDir = join(__dirname, '../../uploads')
-    } = options;
-
-    try {
-      console.log(`開始 MLX Whisper 完整轉錄處理: ${audioPath}`);
-
-      // 1. 執行轉錄獲取 word-level timestamps
-      const result = await this.transcribeWithWordTimestamps(audioPath, {
-        model,
-        language
-      });
-
-      // 2. 收集所有 word segments
-      const allWordSegments: WordSegment[] = [];
-      
-      for (const segment of result.segments) {
-        if (segment.words && segment.words.length > 0) {
-          for (const word of segment.words) {
-            allWordSegments.push({
-              text: word.word,
-              t0: word.start,
-              t1: word.end
-            });
-          }
-        }
-      }
-
-      // 3. 組合成句子
-      const sentences = this.combineWordsToSentences(allWordSegments);
-
-      // 4. 生成 SRT 內容
-      const srtContent = this.generateSrtFromSentences(sentences);
-
-      // 5. 保存 SRT 檔案（如果需要）
-      let srtPath: string | undefined;
-      if (saveSrt) {
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const baseName = require('path').basename(audioPath, require('path').extname(audioPath));
-        const srtFileName = `${baseName}_${timestamp}.srt`;
-        srtPath = join(outputDir, srtFileName);
-        
-        await fs.writeFile(srtPath, srtContent, 'utf-8');
-        console.log(`SRT 檔案已生成: ${srtPath}`);
-      }
-
-      const transcriptionResult: MLXTranscriptionResult = {
-        success: true,
-        text: result.text,
-        language: result.language,
-        segments: result.segments,
-        sentences,
-        srtContent,
-        srtPath
-      };
-
-      console.log(`MLX Whisper 處理完成 - 共 ${sentences.length} 個句子，${allWordSegments.length} 個詞`);
-      return transcriptionResult;
-
-    } catch (error) {
-      console.error('MLX Whisper 處理失敗:', error);
-      return {
-        success: false,
-        text: '',
-        language: 'unknown',
-        segments: [],
-        sentences: [],
-        srtContent: '',
-        error: error instanceof Error ? error.message : String(error)
-      };
-    }
-  }
+export interface MLXWhisperConfig {
+  pythonPath: string;
+  scriptPath: string;
+  venvPath: string;
 }
 
-// 導出單例
-export const mlxWhisperService = new MLXWhisperService();
+// 設定工廠函數
+const createMLXWhisperConfig = (): MLXWhisperConfig => {
+  const venvPath = join(__dirname, '../../.venv');
+  const pythonPath = join(venvPath, 'bin', 'python');
+  const scriptPath = join(__dirname, '../../scripts/mlx_whisper_wrapper.py');
+  
+  return {
+    pythonPath,
+    scriptPath,
+    venvPath
+  };
+};
+
+// 執行 Python 腳本的純函數
+const executePythonScript = (
+  config: MLXWhisperConfig
+) => async (
+  args: string[],
+  options: { timeout?: number } = {}
+): Promise<MLXWhisperResponse> => {
+  const { timeout = 300000 } = options; // 5分鐘預設超時
+
+  return new Promise((resolve, reject) => {
+    const childProcess = spawn(config.pythonPath, args, {
+      cwd: join(__dirname, '../..'),
+      env: {
+        ...process.env,
+        PYTHONPATH: join(config.venvPath, 'lib/python3.11/site-packages')
+      }
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    childProcess.stdout?.on('data', (data: any) => {
+      stdout += data.toString();
+    });
+
+    childProcess.stderr?.on('data', (data: any) => {
+      stderr += data.toString();
+    });
+
+    const timeoutId = setTimeout(() => {
+      childProcess.kill('SIGTERM');
+      reject(new Error(`執行超時 (${timeout}ms)`));
+    }, timeout);
+
+    childProcess.on('close', (code: any) => {
+      clearTimeout(timeoutId);
+
+      if (code !== 0) {
+        console.error('Python 腳本執行錯誤:', stderr);
+        reject(new Error(`Python 腳本執行失敗 (exit code: ${code}): ${stderr}`));
+        return;
+      }
+
+      try {
+        const result = JSON.parse(stdout) as MLXWhisperResponse;
+        resolve(result);
+      } catch (parseError) {
+        console.error('解析 JSON 結果失敗:', stdout);
+        reject(new Error(`解析結果失敗: ${parseError instanceof Error ? parseError.message : String(parseError)}`));
+      }
+    });
+
+    childProcess.on('error', (error: any) => {
+      clearTimeout(timeoutId);
+      reject(new Error(`啟動 Python 進程失敗: ${error.message}`));
+    });
+  });
+};
+
+// 格式化時間的純函數
+const formatTime = (seconds: number): string => {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  const milliseconds = Math.floor((seconds % 1) * 1000);
+
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')},${milliseconds.toString().padStart(3, '0')}`;
+};
+
+// 將 word-level segments 組合成完整句子的純函數
+const combineWordsToSentences = (wordSegments: WordSegment[]): SentenceSegment[] => {
+  if (!wordSegments.length) {
+    return [];
+  }
+
+  const sentences: SentenceSegment[] = [];
+  let currentWords: WordSegment[] = [];
+  let sentenceIndex = 1;
+
+  // 句子結束標點
+  const sentenceEndPunctuation = '.!?。！？；;';
+
+  for (let i = 0; i < wordSegments.length; i++) {
+    const wordSegment = wordSegments[i];
+    
+    // 跳過空白的 segments
+    if (!wordSegment.text.trim()) {
+      continue;
+    }
+
+    currentWords.push(wordSegment);
+
+    // 檢查是否需要結束當前句子
+    let shouldEndSentence = false;
+
+    // 檢查句子結束標點
+    if (sentenceEndPunctuation.split('').some(punct => wordSegment.text.includes(punct))) {
+      shouldEndSentence = true;
+    }
+
+    // 如果是最後一個詞，也要結束句子
+    if (i === wordSegments.length - 1) {
+      shouldEndSentence = true;
+    }
+
+    if (shouldEndSentence && currentWords.length > 0) {
+      // 建立句子
+      const sentenceText = currentWords.map(word => word.text).join(' ')
+        .replace(/\s+/g, ' ').trim();
+
+      const startTime = currentWords[0].t0;
+      const endTime = currentWords[currentWords.length - 1].t1;
+
+      const startTimeStr = formatTime(startTime);
+      const endTimeStr = formatTime(endTime);
+      const srtTimestamp = `${startTimeStr} --> ${endTimeStr}`;
+
+      const sentence: SentenceSegment = {
+        text: sentenceText,
+        start: startTime,
+        end: endTime,
+        index: sentenceIndex,
+        srt_timestamp: srtTimestamp,
+        start_time: startTimeStr,
+        end_time: endTimeStr
+      };
+
+      sentences.push(sentence);
+      sentenceIndex++;
+      currentWords = [];
+    }
+  }
+
+  return sentences;
+};
+
+// 將句子轉換為標準 SRT 字幕格式的純函數
+const generateSrtFromSentences = (sentences: SentenceSegment[]): string => {
+  const srtContent: string[] = [];
+
+  for (const sentence of sentences) {
+    srtContent.push(sentence.index.toString());
+    srtContent.push(sentence.srt_timestamp);
+    srtContent.push(sentence.text);
+    srtContent.push(''); // 空行分隔
+  }
+
+  return srtContent.join('\n');
+};
+
+// 將 MLX Whisper 結果轉換為 SRT 格式的純函數
+const generateSRT = (result: MLXWhisperResult): string => {
+  const srtLines: string[] = [];
+
+  result.segments.forEach((segment, index) => {
+    const startTime = formatTime(segment.start);
+    const endTime = formatTime(segment.end);
+    
+    srtLines.push(`${index + 1}`);
+    srtLines.push(`${startTime} --> ${endTime}`);
+    srtLines.push(segment.text.trim());
+    srtLines.push('');
+  });
+
+  return srtLines.join('\n');
+};
+
+// 轉錄音頻檔案並返回逐字時間戳
+export const transcribeWithWordTimestamps = async (
+  audioPath: string,
+  options: MLXWhisperOptions = {}
+): Promise<MLXWhisperResult> => {
+  const config = createMLXWhisperConfig();
+  const executeScript = executePythonScript(config);
+  
+  const {
+    model = 'mlx-community/whisper-large-v3-turbo',
+    language,
+    outputFile
+  } = options;
+
+  try {
+    // 檢查音頻檔案是否存在
+    await fs.access(audioPath);
+
+    // 構建命令參數
+    const args = [config.scriptPath, audioPath, '--model', model];
+    
+    if (language) {
+      args.push('--language', language);
+    }
+    
+    if (outputFile) {
+      args.push('--output', outputFile);
+    }
+
+    console.log(`執行 MLX Whisper 轉錄: ${audioPath}`);
+    console.log(`使用模型: ${model}`);
+    if (language) {
+      console.log(`指定語言: ${language}`);
+    }
+
+    const result = await executeScript(args);
+    
+    if (result.error) {
+      throw new Error(result.error);
+    }
+
+    if (!result.success || !result.result) {
+      throw new Error('轉錄失敗：未收到有效結果');
+    }
+
+    console.log('MLX Whisper 轉錄完成');
+    return result.result;
+
+  } catch (error) {
+    console.error('MLX Whisper 轉錄錯誤:', error);
+    throw new Error(`MLX Whisper 轉錄失敗: ${error instanceof Error ? error.message : String(error)}`);
+  }
+};
+
+// 檢查 MLX Whisper 環境是否可用
+export const checkEnvironment = async (): Promise<{ available: boolean; error?: string }> => {
+  const config = createMLXWhisperConfig();
+  const executeScript = executePythonScript(config);
+  
+  try {
+    // 檢查 Python 路徑
+    await fs.access(config.pythonPath);
+    
+    // 檢查腳本檔案
+    await fs.access(config.scriptPath);
+    
+    // 簡單測試：執行 Python 腳本但不提供音頻檔案
+    await executeScript(['--help'], { timeout: 5000 });
+    
+    return { available: true };
+  } catch (error) {
+    return {
+      available: false,
+      error: `MLX Whisper 環境不可用: ${error instanceof Error ? error.message : String(error)}`
+    };
+  }
+};
+
+// 完整的 MLX Whisper 轉錄處理（包含 word-level 重組和 SRT 生成）
+export const processTranscription = async (
+  audioPath: string,
+  options: MLXWhisperOptions & { saveSrt?: boolean; outputDir?: string } = {}
+): Promise<MLXTranscriptionResult> => {
+  const {
+    model = 'mlx-community/whisper-large-v3-turbo',
+    language,
+    saveSrt = true,
+    outputDir = join(__dirname, '../../uploads')
+  } = options;
+
+  try {
+    console.log(`開始 MLX Whisper 完整轉錄處理: ${audioPath}`);
+
+    // 1. 執行轉錄獲取 word-level timestamps
+    const result = await transcribeWithWordTimestamps(audioPath, {
+      model,
+      language
+    });
+
+    // 2. 收集所有 word segments
+    const allWordSegments: WordSegment[] = [];
+    
+    for (const segment of result.segments) {
+      if (segment.words && segment.words.length > 0) {
+        for (const word of segment.words) {
+          allWordSegments.push({
+            text: word.word,
+            t0: word.start,
+            t1: word.end
+          });
+        }
+      }
+    }
+
+    // 3. 組合成句子
+    const sentences = combineWordsToSentences(allWordSegments);
+
+    // 4. 生成 SRT 內容
+    const srtContent = generateSrtFromSentences(sentences);
+
+    // 5. 保存 SRT 檔案（如果需要）
+    let srtPath: string | undefined;
+    if (saveSrt) {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const baseName = require('path').basename(audioPath, require('path').extname(audioPath));
+      const srtFileName = `${baseName}_${timestamp}.srt`;
+      srtPath = join(outputDir, srtFileName);
+      
+      await fs.writeFile(srtPath, srtContent, 'utf-8');
+      console.log(`SRT 檔案已生成: ${srtPath}`);
+    }
+
+    const transcriptionResult: MLXTranscriptionResult = {
+      success: true,
+      text: result.text,
+      language: result.language,
+      segments: result.segments,
+      sentences,
+      srtContent,
+      srtPath
+    };
+
+    console.log(`MLX Whisper 處理完成 - 共 ${sentences.length} 個句子，${allWordSegments.length} 個詞`);
+    return transcriptionResult;
+
+  } catch (error) {
+    console.error('MLX Whisper 處理失敗:', error);
+    return {
+      success: false,
+      text: '',
+      language: 'unknown',
+      segments: [],
+      sentences: [],
+      srtContent: '',
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+};
+
+// 導出便利函數物件（保持向後兼容）
+export const mlxWhisperService = {
+  transcribeWithWordTimestamps,
+  checkEnvironment,
+  generateSRT,
+  processTranscription
+};

@@ -4,6 +4,7 @@ import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import { downloadAndProcessYoutube } from '../utils/youtube.utils';
 import { whisperService } from './whisper.service';
+import { mlxWhisperService } from './mlx-whisper.service';
 import { WhisperParams } from '../types/whisper.types';
 import { WordSegment, combineWordsToSentences, generateSrtFromSentences, generateSrtFromSegments } from '../utils/sentence.utils';
 import { youtubeEmitter } from '../socket/handlers/youtube.handler';
@@ -13,6 +14,10 @@ import { videoListService } from './videolist.service';
 const DEQUEUE_URL = 'https://n0fa1a9zo2.execute-api.ap-southeast-2.amazonaws.com/dequeue';
 const LONG_POLLING_INTERVAL = 10 * 60 * 1000; // 10 minutes
 const SHORT_RETRY_INTERVAL = 15 * 1000; // 15 seconds
+
+// Whisper Engine Selection
+const WHISPER_ENGINE = process.env.WHISPER_ENGINE || 'whisper-cpp';
+console.log(`[SQS Processor] Using Whisper engine: ${WHISPER_ENGINE}`);
 
 /**
  * Fetches a message from the SQS queue via API Gateway.
@@ -116,60 +121,82 @@ async function processQueue(): Promise<void> {
           console.error(`[${jobId}] Failed to upload video metadata to R2:`, metadataUploadResult.error);
         }
         
-        // 2. Transcribe Audio (Normal Mode)
-        const allSegments: Array<{text: string; start: number; end: number}> = [];
-        const params: WhisperParams = {
-          language: 'auto',
-          model: path.join(process.cwd(), 'models/ggml-large-v3-turbo.bin'),
-          use_gpu: true,
-          fname_inp: audioFilePath,
-          no_prints: true,
-          flash_attn: false,
-          comma_in_time: false,
-          translate: false,
-          no_timestamps: false,
-          audio_ctx: 0,
-          max_len: 0, // Normal mode for accurate transcription
-          segment_callback: (segment) => {
-            allSegments.push({
-              text: segment.text,
-              start: segment.t0,
-              end: segment.t1
-            });
-          },
-        };
+        // 2. Transcribe Audio
+        let srtContent: string;
+        let detectedLanguage = 'auto';
+        console.log(`[${jobId}] Starting transcription using ${WHISPER_ENGINE}...`);
 
-        console.log(`[${jobId}] Starting transcription...`);
-        const result = await whisperService.transcribe(params);
-        console.log(`[${jobId}] Transcription finished. Collected ${allSegments.length} segments via callback.`);
-        
-        // Debug: Check collected segments
-        console.log(`[${jobId}] Collected segments:`, {
-          segmentCount: allSegments.length,
-          firstSegment: allSegments[0] || 'No segments',
-          totalText: allSegments.map(s => s.text).join(' ').substring(0, 100) + '...'
-        });
+        if (WHISPER_ENGINE === 'mlx-whisper') {
+          // Use MLX Whisper
+          const mlxResult = await mlxWhisperService.processTranscription(audioFilePath, {
+            model: 'mlx-community/whisper-large-v3-turbo'
+            // MLX Whisper doesn't support 'auto' language, omit to enable auto-detection
+          });
 
-        // 3. Generate SRT from collected segments
-        const srtContent = generateSrtFromSegments(allSegments);
-        console.log(`[${jobId}] Generated SRT content length: ${srtContent.length}`);
+          if (!mlxResult.success) {
+            throw new Error(`MLX Whisper transcription failed: ${mlxResult.error}`);
+          }
 
-        // 4. Save SRT file
+          srtContent = mlxResult.srtContent;
+          detectedLanguage = 'auto'; // Force use 'default' for consistent R2 path structure
+          console.log(`[${jobId}] MLX Whisper transcription finished. Generated SRT content length: ${srtContent.length} language : ${detectedLanguage}`);
+
+        } else {
+          // Use WhisperCPP (default)
+          const allSegments: Array<{text: string; start: number; end: number}> = [];
+          const params: WhisperParams = {
+            language: 'auto',
+            model: path.join(process.cwd(), 'models/ggml-large-v3-turbo.bin'),
+            use_gpu: true,
+            fname_inp: audioFilePath,
+            no_prints: true,
+            flash_attn: false,
+            comma_in_time: false,
+            translate: false,
+            no_timestamps: false,
+            audio_ctx: 0,
+            max_len: 0, // Normal mode for accurate transcription
+            segment_callback: (segment) => {
+              allSegments.push({
+                text: segment.text,
+                start: segment.t0,
+                end: segment.t1
+              });
+            },
+          };
+
+          const result = await whisperService.transcribe(params);
+          detectedLanguage = params.language;
+          console.log(`[${jobId}] WhisperCPP transcription finished. Collected ${allSegments.length} segments via callback.`);
+          
+          // Debug: Check collected segments
+          console.log(`[${jobId}] Collected segments:`, {
+            segmentCount: allSegments.length,
+            firstSegment: allSegments[0] || 'No segments',
+            totalText: allSegments.map(s => s.text).join(' ').substring(0, 100) + '...'
+          });
+
+          // Generate SRT from collected segments
+          srtContent = generateSrtFromSegments(allSegments);
+          console.log(`[${jobId}] Generated SRT content length: ${srtContent.length}`);
+        }
+
+        // 3. Save SRT file
         const srtOutputPath = path.join(process.cwd(), 'uploads', `${videoId}.srt`);
         await fs.writeFile(srtOutputPath, srtContent, 'utf-8');
         console.log(`[${jobId}] SRT file saved to: ${srtOutputPath}`);
 
-        // 5. Upload to R2
+        // 4. Upload to R2
         const fileSize = await r2Service.getFileSize(srtOutputPath);
         if (fileSize) {
           console.log(`[${jobId}] Uploading SRT file (${r2Service.formatFileSize(fileSize)}) to R2...`);
         }
-        
-        const uploadResult = await r2Service.uploadSrtToR2(srtOutputPath, videoId, params.language);
+        console.log(`[${jobId}] About to upload with detectedLanguage: ${detectedLanguage}`);
+        const uploadResult = await r2Service.uploadSrtToR2(srtOutputPath, videoId, detectedLanguage);
         if (uploadResult.success) {
           console.log(`[${jobId}] Successfully uploaded ${videoId}.srt to R2: ${uploadResult.remotePath}`);
           
-          // 6. Update VideoList.json
+          // 5. Update VideoList.json
           try {
             console.log(`[${jobId}] Updating VideoList.json...`);
             
@@ -209,7 +236,7 @@ async function processQueue(): Promise<void> {
         console.error(`[${jobId}] Failed to process video ID ${videoId}:`, jobError);
         youtubeEmitter.emitError(jobId, jobError instanceof Error ? jobError : new Error('Unknown processing error'));
       } finally {
-        // 7. Cleanup
+        // 6. Cleanup
         if (audioFilePath) {
           try {
             await fs.unlink(audioFilePath);
