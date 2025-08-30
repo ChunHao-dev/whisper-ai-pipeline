@@ -12,6 +12,7 @@ import { v4 as uuidv4 } from "uuid";
 import { whisperService } from "./services/whisper.service";
 import { WhisperParams } from "./types/whisper.types";
 import { TranscribeResponse, ErrorResponse, YoutubeTranscribeRequest, YoutubeToSrtRequest, YoutubeToSrtResponse } from "./types/api.types";
+import { transcribeFile } from "./controllers/transcription.controller";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { downloadAndProcessYoutube } from "./utils/youtube.utils";
@@ -213,101 +214,8 @@ app.post(
   }
 );
 
-app.post(
-  "/api/transcribe",
-  upload.single("audio"),
-  async (
-    req: Request,
-    res: Response<TranscribeResponse | ErrorResponse>
-  ): Promise<void> => {
-    // 為每個轉錄任務創建一個序號計數器（檔案上傳版本）
-    let segmentIndex = 1;
-    console.log("收到轉錄請求");
-    console.log("上傳的檔案:", req.file);
-    if (!req.file) {
-      res.status(400).json({ error: "必須提供音檔" });
-      return;
-    }
-
-    const tempFilePath = req.file.path;
-    const jobId = uuidv4();
-
-    try {
-      const params: WhisperParams = {
-        language: "auto",
-        model: join(process.cwd(), "models/ggml-large-v3-turbo.bin"),
-        use_gpu: true,
-        fname_inp: tempFilePath,
-        no_prints: true,
-        flash_attn: false,
-        comma_in_time: false,
-        translate: false,
-        no_timestamps: false,
-        audio_ctx: 0,
-        max_len: 0,
-        segment_callback: (segment) => {
-          // 使用 new_segment_callback
-          // const [start, end, text] = segment;
-          // console.log(`---- andy[${start} --> ${end}] ${text}`);
-          const formattedSegment = {
-            ...segment,
-            index: segmentIndex++,
-            srtTimestamp: `${formatTimestamp(segment.t0)} --> ${formatTimestamp(segment.t1)}`,
-            startTime: formatTimestamp(segment.t0),
-            endTime: formatTimestamp(segment.t1)
-          };
-          
-          console.log(`${formattedSegment.index}\n${formattedSegment.srtTimestamp}\n${segment.text}\n`);
-          console.log(formattedSegment);
-          transcriptionEmitter.emitSegment(jobId, formattedSegment);
-          // console.log(segment.text)
-        },
-        progress_callback: (progress) => {
-          transcriptionEmitter.emitProgress(jobId, progress);
-        },
-      };
-
-      // 立即回應 jobId，表示任務已開始處理
-      res.json({
-        jobId,
-        status: "processing",
-      });
-
-      // 非同步處理轉錄任務
-      whisperService
-        .transcribe(params)
-        .then((result) => {
-          transcriptionEmitter.emitComplete(jobId, result);
-        })
-        .catch((error) => {
-          transcriptionEmitter.emitError(jobId, error instanceof Error ? error.message : "未知錯誤");
-        })
-        .finally(async () => {
-          try {
-            await fs.unlink(tempFilePath);
-            console.log("已清理暫存檔案:", tempFilePath);
-          } catch (error) {
-            console.error("清理暫存檔案失敗:", error);
-          }
-        });
-    } catch (error) {
-      console.error("轉錄初始化失敗:", error);
-      res.status(500).json({
-        jobId,
-        status: "error",
-        error: error instanceof Error ? error.message : "未知錯誤",
-      });
-
-      // 清理暫存檔案
-      try {
-        await fs.unlink(tempFilePath);
-        console.log("已清理暫存檔案:", tempFilePath);
-      } catch (cleanupError) {
-        console.error("清理暫存檔案失敗:", cleanupError);
-      }
-    }
-  }
-);
+// 轉錄 API - 檔案上傳版本（重構後使用 Controller + UseCase）
+app.post("/api/transcribe", upload.single("audio"), transcribeFile);
 
 // Youtube to SRT API
 app.post(
