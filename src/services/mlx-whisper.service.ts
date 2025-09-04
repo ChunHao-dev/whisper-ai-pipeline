@@ -1,26 +1,22 @@
 import { spawn } from 'child_process';
 import { join } from 'path';
 import { promises as fs } from 'fs';
+import {
+  TranscriptionSegment,
+  TranscriptionWord,
+  generateSrtFromSegments,
+  generateSrtContent,
+  formatSrtTime
+} from '../domain/entities';
 
-export interface MLXWhisperWord {
-  word: string;
-  start: number;
-  end: number;
-  probability?: number;
-}
-
-export interface MLXWhisperSegment {
-  id: number;
-  start: number;
-  end: number;
-  text: string;
-  words: MLXWhisperWord[];
-}
+// Legacy interfaces for backward compatibility
+export interface MLXWhisperWord extends TranscriptionWord {}
+export interface MLXWhisperSegment extends TranscriptionSegment {}
 
 export interface MLXWhisperResult {
   text: string;
   language: string;
-  segments: MLXWhisperSegment[];
+  segments: TranscriptionSegment[];
 }
 
 export interface WordSegment {
@@ -140,15 +136,7 @@ const executePythonScript = (
   });
 };
 
-// 格式化時間的純函數
-const formatTime = (seconds: number): string => {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
-  const milliseconds = Math.floor((seconds % 1) * 1000);
-
-  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')},${milliseconds.toString().padStart(3, '0')}`;
-};
+// 使用 Domain Entity 的時間格式化函數 (formatSrtTime)
 
 // 將 word-level segments 組合成完整句子的純函數
 const combineWordsToSentences = (wordSegments: WordSegment[]): SentenceSegment[] => {
@@ -194,8 +182,8 @@ const combineWordsToSentences = (wordSegments: WordSegment[]): SentenceSegment[]
       const startTime = currentWords[0].t0;
       const endTime = currentWords[currentWords.length - 1].t1;
 
-      const startTimeStr = formatTime(startTime);
-      const endTimeStr = formatTime(endTime);
+      const startTimeStr = formatSrtTime(startTime);
+      const endTimeStr = formatSrtTime(endTime);
       const srtTimestamp = `${startTimeStr} --> ${endTimeStr}`;
 
       const sentence: SentenceSegment = {
@@ -217,35 +205,9 @@ const combineWordsToSentences = (wordSegments: WordSegment[]): SentenceSegment[]
   return sentences;
 };
 
-// 將句子轉換為標準 SRT 字幕格式的純函數
-const generateSrtFromSentences = (sentences: SentenceSegment[]): string => {
-  const srtContent: string[] = [];
-
-  for (const sentence of sentences) {
-    srtContent.push(sentence.index.toString());
-    srtContent.push(sentence.srt_timestamp);
-    srtContent.push(sentence.text);
-    srtContent.push(''); // 空行分隔
-  }
-
-  return srtContent.join('\n');
-};
-
-// 將 MLX Whisper 結果轉換為 SRT 格式的純函數
+// 使用 Domain Entity 的 SRT 生成函數
 const generateSRT = (result: MLXWhisperResult): string => {
-  const srtLines: string[] = [];
-
-  result.segments.forEach((segment, index) => {
-    const startTime = formatTime(segment.start);
-    const endTime = formatTime(segment.end);
-    
-    srtLines.push(`${index + 1}`);
-    srtLines.push(`${startTime} --> ${endTime}`);
-    srtLines.push(segment.text.trim());
-    srtLines.push('');
-  });
-
-  return srtLines.join('\n');
+  return generateSrtFromSegments(result.segments);
 };
 
 // 轉錄音頻檔案並返回逐字時間戳
@@ -365,8 +327,19 @@ export const processTranscription = async (
     // 3. 組合成句子
     const sentences = combineWordsToSentences(allWordSegments);
 
-    // 4. 生成 SRT 內容
-    const srtContent = generateSrtFromSentences(sentences);
+    // 4. 使用 Domain Entity 生成 SRT 內容
+    // 將 SentenceSegment 轉換為 TranscriptionSentence 格式
+    const transcriptionSentences = sentences.map(sentence => ({
+      text: sentence.text,
+      start: sentence.start,
+      end: sentence.end,
+      index: sentence.index,
+      srtTimestamp: sentence.srt_timestamp,
+      startTime: sentence.start_time,
+      endTime: sentence.end_time
+    }));
+    
+    const srtContent = generateSrtContent(transcriptionSentences);
 
     // 5. 保存 SRT 檔案（如果需要）
     let srtPath: string | undefined;

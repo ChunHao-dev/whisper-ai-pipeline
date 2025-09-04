@@ -1,14 +1,23 @@
-import fs from "fs/promises";
 import { join } from "path";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { downloadAndProcessYoutube } from "../utils/youtube.utils";
 import { YoutubeToSrtResponse } from "../types/api.types";
+import { StorageRepository } from "../domain/repositories/storage.repository";
+import { defaultStorageRepository } from "../infrastructure/repositories";
+import { 
+  extractVideoIdFromUrl, 
+  isValidYouTubeUrl, 
+  createVideo, 
+  validateVideoForTranscription,
+  formatVideoDuration 
+} from "../domain/entities";
 
 export interface YoutubeToSrtOptions {
   url: string;
   language: string;
   jobId: string;
+  storageRepository?: StorageRepository;
   onComplete?: (result: YoutubeToSrtResponse) => void;
   onError?: (error: string) => void;
 }
@@ -23,19 +32,53 @@ export const youtubeToSrtService = {
    * 處理完整的下載 → MLX轉錄 → SRT生成 → 清理流程
    */
   startYoutubeToSrt: async (options: YoutubeToSrtOptions): Promise<void> => {
-    const { url, language, jobId, onComplete, onError } = options;
+    const { url, language, jobId, storageRepository = defaultStorageRepository, onComplete, onError } = options;
     let audioFiles: string[] = [];
     const execPromise = promisify(exec);
 
     try {
-      // 1. YouTube 特定邏輯：下載音頻
+      // 1. 使用 Domain Entity 驗證 YouTube URL
+      if (!isValidYouTubeUrl(url)) {
+        throw new Error("無效的 YouTube URL");
+      }
+
+      const videoId = extractVideoIdFromUrl(url);
+      if (!videoId) {
+        throw new Error("無法從 URL 提取影片 ID");
+      }
+
+      console.log(`開始處理 YouTube 影片: ${videoId}`);
+
+      // 2. YouTube 特定邏輯：下載音頻
       const downloadResult = await downloadAndProcessYoutube(url, jobId);
       audioFiles = downloadResult.audioFiles;
       const filePath = audioFiles[0];
       const absoluteFilePath = join(process.cwd(), filePath);
       console.log("下載的音訊檔案絕對路徑:", absoluteFilePath);
+
+      // 3. 使用 Domain Entity 創建和驗證影片資訊
+      if (downloadResult.videoInfo) {
+        const video = createVideo(
+          videoId,
+          downloadResult.videoInfo.title || "Unknown Title",
+          downloadResult.videoInfo.duration || 0,
+          url,
+          undefined,
+          language
+        );
+
+        const validation = validateVideoForTranscription(video);
+        if (!validation.isValid) {
+          console.warn("影片驗證警告:", validation.errors.join(', '));
+          if (validation.errors.some(error => error.includes('時長'))) {
+            throw new Error(`影片不符合轉錄要求: ${validation.errors.join(', ')}`);
+          }
+        }
+
+        console.log(`影片資訊: 標題="${video.title}", 時長=${formatVideoDuration(video.duration)}`);
+      }
       
-      // 2. 執行 MLX Whisper 命令生成 SRT
+      // 4. 執行 MLX Whisper 命令生成 SRT
       const mlxWhisperPath = "/Users/chchen/Andy_Folder/Project/Personal/transcribe/mlx-whisper/venv/bin/mlx_whisper";
       const outputDir = join(process.cwd(), "uploads");
       const srtFileName = `${jobId}.srt`;
@@ -51,11 +94,11 @@ export const youtubeToSrtService = {
         console.error("轉錄錯誤:", stderr);
       }
 
-      // 3. YouTube 特定邏輯：清理檔案
-      await fs.unlink(absoluteFilePath);
+      // 5. YouTube 特定邏輯：清理檔案
+      await storageRepository.deleteFile(absoluteFilePath);
       console.log("已清理音訊檔案:", absoluteFilePath);
 
-      // 4. 回調成功結果
+      // 6. 回調成功結果
       const response: YoutubeToSrtResponse = {
         jobId,
         status: "complete",
@@ -82,11 +125,11 @@ export const youtubeToSrtService = {
   /**
    * 清理音頻檔案
    */
-  cleanupAudioFiles: async (audioFiles: string[]): Promise<void> => {
+  cleanupAudioFiles: async (audioFiles: string[], storageRepository = defaultStorageRepository): Promise<void> => {
     try {
       await Promise.all(audioFiles.map(filePath => {
         const absolutePath = join(process.cwd(), filePath);
-        return fs.unlink(absolutePath).catch(err => 
+        return storageRepository.deleteFile(absolutePath).catch(err => 
           console.error(`清理檔案 ${absolutePath} 失敗:`, err)
         );
       }));

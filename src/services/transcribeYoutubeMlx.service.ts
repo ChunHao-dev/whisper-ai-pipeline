@@ -1,13 +1,15 @@
-import fs from "fs/promises";
 import { join } from "path";
 import { downloadAndProcessYoutube } from "../utils/youtube.utils";
 import { mlxWhisperService, MLXTranscriptionResult } from "./mlx-whisper.service";
+import { StorageRepository } from "../domain/repositories/storage.repository";
+import { defaultStorageRepository } from "../infrastructure/repositories";
 
 export interface TranscribeYoutubeMlxOptions {
   url: string;
   language?: string;
   model?: string;
   jobId: string;
+  storageRepository?: StorageRepository;
   onComplete?: (result: any) => void;
   onError?: (error: string) => void;
 }
@@ -22,7 +24,7 @@ export const transcribeYoutubeMlxService = {
    * 處理完整的下載 → MLX轉錄 → 清理流程
    */
   startYoutubeMlxTranscription: async (options: TranscribeYoutubeMlxOptions): Promise<void> => {
-    const { url, language, model, jobId, onComplete, onError } = options;
+    const { url, language, model, jobId, storageRepository = defaultStorageRepository, onComplete, onError } = options;
     let audioFiles: string[] = [];
 
     try {
@@ -43,7 +45,7 @@ export const transcribeYoutubeMlxService = {
       });
 
       // 3. YouTube 特定邏輯：清理檔案
-      await fs.unlink(absoluteFilePath);
+      await storageRepository.deleteFile(absoluteFilePath);
       console.log("已清理音訊檔案:", absoluteFilePath);
 
       // 4. 處理轉錄結果
@@ -78,18 +80,18 @@ export const transcribeYoutubeMlxService = {
       }
 
       // 錯誤發生時，清理所有暫存檔案
-      await transcribeYoutubeMlxService.cleanupAudioFiles(audioFiles);
+      await transcribeYoutubeMlxService.cleanupAudioFiles(audioFiles, storageRepository);
     }
   },
 
   /**
    * 清理音頻檔案
    */
-  cleanupAudioFiles: async (audioFiles: string[]): Promise<void> => {
+  cleanupAudioFiles: async (audioFiles: string[], storageRepository = defaultStorageRepository): Promise<void> => {
     try {
       await Promise.all(audioFiles.map(filePath => {
         const absolutePath = join(process.cwd(), filePath);
-        return fs.unlink(absolutePath).catch(err => 
+        return storageRepository.deleteFile(absolutePath).catch(err => 
           console.error(`清理檔案 ${absolutePath} 失敗:`, err)
         );
       }));

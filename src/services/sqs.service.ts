@@ -1,6 +1,5 @@
 import https from 'https';
 import path from 'path';
-import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import { downloadAndProcessYoutube } from '../utils/youtube.utils';
 import { whisperService } from './whisper.service';
@@ -8,8 +7,7 @@ import { mlxWhisperService } from './mlx-whisper.service';
 import { WhisperParams } from '../types/whisper.types';
 import { WordSegment, combineWordsToSentences, generateSrtFromSentences, generateSrtFromSegments } from '../utils/sentence.utils';
 import { youtubeEmitter } from '../socket/handlers/youtube.handler';
-import { r2Service } from './r2.service';
-import { videoListService } from './videolist.service';
+import { defaultStorageRepository } from '../infrastructure/repositories';
 
 const DEQUEUE_URL = 'https://n0fa1a9zo2.execute-api.ap-southeast-2.amazonaws.com/dequeue';
 const LONG_POLLING_INTERVAL = 10 * 60 * 1000; // 10 minutes
@@ -112,13 +110,13 @@ async function processQueue(): Promise<void> {
         const videoInfo = downloadResult.videoInfo;
         console.log(`[${jobId}] Audio downloaded successfully to: ${audioFilePath}`);
 
-        // 1.1. Upload video metadata to R2
-        console.log(`[${jobId}] Uploading video metadata to R2...`);
-        const metadataUploadResult = await r2Service.uploadVideoMetadataToR2(videoInfo);
+        // 1.1. Upload video metadata using Repository
+        console.log(`[${jobId}] Uploading video metadata...`);
+        const metadataUploadResult = await defaultStorageRepository.uploadVideoMetadata(videoInfo);
         if (metadataUploadResult.success) {
-          console.log(`[${jobId}] Successfully uploaded video metadata to R2: ${metadataUploadResult.note}`);
+          console.log(`[${jobId}] Successfully uploaded video metadata: ${metadataUploadResult.note}`);
         } else {
-          console.error(`[${jobId}] Failed to upload video metadata to R2:`, metadataUploadResult.error);
+          console.error(`[${jobId}] Failed to upload video metadata:`, metadataUploadResult.error);
         }
         
         // 2. Transcribe Audio
@@ -181,54 +179,52 @@ async function processQueue(): Promise<void> {
           console.log(`[${jobId}] Generated SRT content length: ${srtContent.length}`);
         }
 
-        // 3. Save SRT file
-        const srtOutputPath = path.join(process.cwd(), 'uploads', `${videoId}.srt`);
-        await fs.writeFile(srtOutputPath, srtContent, 'utf-8');
+        // 3. Save SRT file using Repository
+        const srtOutputPath = await defaultStorageRepository.saveSrtLocally(
+          srtContent, 
+          `${videoId}.srt`, 
+          'uploads'
+        );
         console.log(`[${jobId}] SRT file saved to: ${srtOutputPath}`);
 
-        // 4. Upload to R2
-        const fileSize = await r2Service.getFileSize(srtOutputPath);
+        // 4. Upload to storage using Repository
+        const fileSize = await defaultStorageRepository.getFileSize(srtOutputPath);
         if (fileSize) {
-          console.log(`[${jobId}] Uploading SRT file (${r2Service.formatFileSize(fileSize)}) to R2...`);
+          console.log(`[${jobId}] Uploading SRT file (${defaultStorageRepository.formatFileSize(fileSize)})...`);
         }
         console.log(`[${jobId}] About to upload with detectedLanguage: ${detectedLanguage}`);
-        const uploadResult = await r2Service.uploadSrtToR2(srtOutputPath, videoId, detectedLanguage);
+        const uploadResult = await defaultStorageRepository.uploadSrt(srtOutputPath, videoId, detectedLanguage);
         if (uploadResult.success) {
-          console.log(`[${jobId}] Successfully uploaded ${videoId}.srt to R2: ${uploadResult.remotePath}`);
+          console.log(`[${jobId}] Successfully uploaded ${videoId}.srt: ${uploadResult.remotePath}`);
           
-          // 5. Update VideoList.json
+          // 5. Update VideoList.json using Repository
           try {
             console.log(`[${jobId}] Updating VideoList.json...`);
             
-            const addResult = await videoListService.addVideoToList(videoInfo);
+            const updatedVideoList = await defaultStorageRepository.addVideoToList(videoInfo);
+            console.log(`[${jobId}] Successfully added video to VideoList`);
             
-            if (addResult.success && addResult.data) {
-              console.log(`[${jobId}] Successfully added video to VideoList`);
-              
-              // Upload updated VideoList to R2
-              const uploadListResult = await videoListService.uploadVideoListToR2(addResult.data);
-              if (uploadListResult.success) {
-                console.log(`[${jobId}] Successfully uploaded updated VideoList.json to R2`);
-              } else {
-                console.error(`[${jobId}] Failed to upload VideoList.json to R2:`, uploadListResult.error);
-              }
+            // Upload updated VideoList using Repository
+            const uploadListResult = await defaultStorageRepository.uploadVideoList(updatedVideoList);
+            if (uploadListResult.success) {
+              console.log(`[${jobId}] Successfully uploaded updated VideoList.json`);
             } else {
-              console.error(`[${jobId}] Failed to update VideoList:`, addResult.error);
+              console.error(`[${jobId}] Failed to upload VideoList.json:`, uploadListResult.error);
             }
           } catch (videoListError) {
             console.error(`[${jobId}] VideoList update failed:`, videoListError);
             // VideoList 更新失敗不影響 SRT 上傳成功的狀態
           }
           
-          // Delete local SRT file after successful upload
+          // Delete local SRT file after successful upload using Repository
           try {
-            await fs.unlink(srtOutputPath);
+            await defaultStorageRepository.deleteFile(srtOutputPath);
             console.log(`[${jobId}] Cleaned up local SRT file: ${srtOutputPath}`);
           } catch (unlinkError) {
             console.error(`[${jobId}] Failed to delete local SRT file:`, unlinkError);
           }
         } else {
-          console.error(`[${jobId}] Failed to upload ${videoId}.srt to R2:`, uploadResult.error);
+          console.error(`[${jobId}] Failed to upload ${videoId}.srt:`, uploadResult.error);
           console.log(`[${jobId}] Local SRT file preserved at: ${srtOutputPath}`);
         }
 
@@ -236,10 +232,10 @@ async function processQueue(): Promise<void> {
         console.error(`[${jobId}] Failed to process video ID ${videoId}:`, jobError);
         youtubeEmitter.emitError(jobId, jobError instanceof Error ? jobError : new Error('Unknown processing error'));
       } finally {
-        // 6. Cleanup
+        // 6. Cleanup using Repository
         if (audioFilePath) {
           try {
-            await fs.unlink(audioFilePath);
+            await defaultStorageRepository.deleteFile(audioFilePath);
             console.log(`[${jobId}] Cleaned up audio file: ${audioFilePath}`);
           } catch (cleanupError) {
             console.error(`[${jobId}] Failed to clean up audio file ${audioFilePath}:`, cleanupError);

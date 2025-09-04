@@ -1,23 +1,17 @@
 import { coreTranscriptionLogic, createProgressWrapper } from "./coreTranscription.service";
+import { TranscriptionSentence } from "../domain/entities";
 
 export interface TranscriptionOptions {
   filePath: string;
   jobId: string;
   onProgress?: (progress: number) => void;
-  onSegment?: (segment: FormattedSegment) => void;
+  onSegment?: (segment: TranscriptionSentence) => void;  // 使用 Domain Entity
   onComplete?: (result: any) => void;
   onError?: (error: string) => void;
 }
 
-export interface FormattedSegment {
-  text: string;
-  t0: number;
-  t1: number;
-  index: number;
-  srtTimestamp: string;
-  startTime: string;
-  endTime: string;
-}
+// Legacy type alias for backward compatibility
+export interface FormattedSegment extends TranscriptionSentence {}
 
 /**
  * Transcription Service - 檔案轉錄服務
