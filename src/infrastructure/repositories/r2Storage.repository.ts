@@ -315,22 +315,21 @@ export const createR2StorageRepository = (bucketName?: string): StorageRepositor
         // Handle thumbnail if available
         let thumbnailUploadSuccess = true;
         if (videoInfo.thumbnail) {
-          // Convert YouTube thumbnail URL to WebP format
-          let thumbnailUrl = videoInfo.thumbnail;
-          if (thumbnailUrl.includes('i.ytimg.com')) {
-            thumbnailUrl = thumbnailUrl.replace(/\.jpg$/i, '.webp');
-            console.log(`[R2] Converted YouTube thumbnail to WebP: ${thumbnailUrl}`);
-          }
-          
-          const thumbnailPath = path.join(tempDir, `${videoId}-thumbnail.webp`);
-          
+          const thumbnailUrl = videoInfo.thumbnail;
+
+          // Extract file extension from URL (support jpg, jpeg, png, webp)
+          const urlExtension = thumbnailUrl.match(/\.(jpg|jpeg|png|webp)(\?|$)/i)?.[1] || 'jpg';
+          const extension = urlExtension.toLowerCase();
+
+          const thumbnailPath = path.join(tempDir, `${videoId}-thumbnail.${extension}`);
+
           console.log(`[R2] Downloading thumbnail from: ${thumbnailUrl}`);
           const downloadSuccess = await downloadFile(thumbnailUrl, thumbnailPath);
-          
+
           if (downloadSuccess) {
-            const thumbnailRemotePath = `${videoId}/metadata/thumbnail.webp`;
-            const thumbnailDescription = `Uploaded WebP thumbnail for ${videoId} to s3://${finalBucketName}/${thumbnailRemotePath}`;
-            
+            const thumbnailRemotePath = `${videoId}/metadata/thumbnail.${extension}`;
+            const thumbnailDescription = `Uploaded ${extension.toUpperCase()} thumbnail for ${videoId} to s3://${finalBucketName}/${thumbnailRemotePath}`;
+
             try {
               await uploadToR2(thumbnailPath, thumbnailRemotePath, thumbnailDescription);
               // Clean up local thumbnail file
