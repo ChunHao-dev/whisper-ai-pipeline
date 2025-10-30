@@ -149,11 +149,42 @@ const combineWordsToSentences = (wordSegments: WordSegment[]): SentenceSegment[]
   let sentenceIndex = 1;
 
   // 句子結束標點
-  const sentenceEndPunctuation = '.!?。！？；;';
+  const sentenceEndPunctuation = '.!?。！？';
+
+  // 自然斷點詞彙（連接詞、轉折詞等）
+  const naturalBreakWords = ['but', 'and', 'so', 'because', 'however', 'therefore', 'then', 'if', 'when', 'while', 'though', 'although'];
+
+  // 配置參數
+  const MAX_SENTENCE_LENGTH = 120; // 最大字元數
+  const MAX_DURATION_SECONDS = 12; // 最大持續時間（秒）
+  const MIN_WORDS_FOR_BREAK = 8; // 最少詞數才考慮在自然斷點切割
+
+  // 建立句子的輔助函數
+  const createSentence = (words: WordSegment[]): SentenceSegment => {
+    const sentenceText = words.map(word => word.text).join(' ')
+      .replace(/\s+/g, ' ').trim();
+
+    const startTime = words[0].t0;
+    const endTime = words[words.length - 1].t1;
+
+    const startTimeStr = formatSrtTime(startTime);
+    const endTimeStr = formatSrtTime(endTime);
+    const srtTimestamp = `${startTimeStr} --> ${endTimeStr}`;
+
+    return {
+      text: sentenceText,
+      start: startTime,
+      end: endTime,
+      index: sentenceIndex++,
+      srt_timestamp: srtTimestamp,
+      start_time: startTimeStr,
+      end_time: endTimeStr
+    };
+  };
 
   for (let i = 0; i < wordSegments.length; i++) {
     const wordSegment = wordSegments[i];
-    
+
     // 跳過空白的 segments
     if (!wordSegment.text.trim()) {
       continue;
@@ -161,43 +192,58 @@ const combineWordsToSentences = (wordSegments: WordSegment[]): SentenceSegment[]
 
     currentWords.push(wordSegment);
 
+    // 計算當前句子的統計資訊
+    const currentText = currentWords.map(word => word.text).join(' ');
+    const currentDuration = currentWords.length > 0
+      ? wordSegment.t1 - currentWords[0].t0
+      : 0;
+
     // 檢查是否需要結束當前句子
     let shouldEndSentence = false;
 
-    // 檢查句子結束標點
+    // 1. 檢查句子結束標點
     if (sentenceEndPunctuation.split('').some(punct => wordSegment.text.includes(punct))) {
       shouldEndSentence = true;
     }
 
-    // 如果是最後一個詞，也要結束句子
+    // 2. 檢查長度和持續時間限制
+    const exceedsLength = currentText.length > MAX_SENTENCE_LENGTH;
+    const exceedsDuration = currentDuration > MAX_DURATION_SECONDS;
+
+    if ((exceedsLength || exceedsDuration) && currentWords.length >= MIN_WORDS_FOR_BREAK) {
+      // 在自然斷點處切割
+      const wordText = wordSegment.text.toLowerCase().trim().replace(/[,]/g, '');
+      const isNaturalBreak = naturalBreakWords.includes(wordText);
+
+      // 如果當前詞是連接詞，在連接詞之前切割
+      if (isNaturalBreak && i > 0) {
+        const prevWord = wordSegments[i - 1]?.text || '';
+        // 如果前一個詞有逗號，在連接詞之前切割
+        if (prevWord.includes(',')) {
+          const lastWord = currentWords.pop();
+          if (currentWords.length > 0) {
+            sentences.push(createSentence(currentWords));
+            currentWords = lastWord ? [lastWord] : [];
+          } else {
+            if (lastWord) currentWords.push(lastWord);
+          }
+          continue;
+        }
+      }
+
+      // 或者在逗號處切割
+      if (wordSegment.text.includes(',')) {
+        shouldEndSentence = true;
+      }
+    }
+
+    // 3. 如果是最後一個詞，也要結束句子
     if (i === wordSegments.length - 1) {
       shouldEndSentence = true;
     }
 
     if (shouldEndSentence && currentWords.length > 0) {
-      // 建立句子
-      const sentenceText = currentWords.map(word => word.text).join(' ')
-        .replace(/\s+/g, ' ').trim();
-
-      const startTime = currentWords[0].t0;
-      const endTime = currentWords[currentWords.length - 1].t1;
-
-      const startTimeStr = formatSrtTime(startTime);
-      const endTimeStr = formatSrtTime(endTime);
-      const srtTimestamp = `${startTimeStr} --> ${endTimeStr}`;
-
-      const sentence: SentenceSegment = {
-        text: sentenceText,
-        start: startTime,
-        end: endTime,
-        index: sentenceIndex,
-        srt_timestamp: srtTimestamp,
-        start_time: startTimeStr,
-        end_time: endTimeStr
-      };
-
-      sentences.push(sentence);
-      sentenceIndex++;
+      sentences.push(createSentence(currentWords));
       currentWords = [];
     }
   }
