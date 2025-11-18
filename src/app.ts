@@ -7,6 +7,7 @@ import multer from "multer";
 import { Server } from "socket.io";
 import { createServer } from "http";
 import { transcribeFile, transcribeYoutube, youtubeToSrt, transcribeMlx, transcribeYoutubeMlx } from "./controllers/transcription.controller";
+import { segmentSrtController, translateSrtController, getSegmentationController, getSrtController } from "./controllers/srt.controller";
 import { socketConfig } from "./config/socket";
 import {
   setupTranscriptionHandler,
@@ -68,6 +69,20 @@ app.post("/api/transcribe-mlx", upload.single("audio"), transcribeMlx);
 
 // MLX Whisper YouTube 轉錄 API（重構後使用 Controller + UseCase + Service）
 app.post("/api/transcribe-youtube-mlx", transcribeYoutubeMlx);
+
+// ==================== SRT 分段和翻譯 API ====================
+
+// SRT 分段 API
+app.post("/api/srt/segment", segmentSrtController);
+
+// SRT 翻譯 API
+app.post("/api/srt/translate", translateSrtController);
+
+// 獲取分段資訊 API
+app.get("/api/srt/segmentation/:videoId/:language", getSegmentationController);
+
+// 獲取 SRT 內容 API
+app.get("/api/srt/:videoId/:language", getSrtController);
 
 // MLX Whisper 健康檢查 API
 app.get("/api/mlx-health", async (req: Request, res: Response) => {

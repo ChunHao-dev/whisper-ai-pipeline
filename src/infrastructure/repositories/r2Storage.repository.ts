@@ -174,8 +174,8 @@ export const createR2StorageRepository = (bucketName?: string): StorageRepositor
    * @returns Normalized language code for file path
    */
   const normalizeLanguageCode = (language: string): string => {
-    // Handle 'auto' detection - default to 'default' for now
-    if (language === 'auto') {
+    // Handle 'auto' and 'default' - keep as 'default'
+    if (language === 'auto' || language === 'default') {
       return 'default';
     }
     
@@ -410,6 +410,186 @@ export const createR2StorageRepository = (bucketName?: string): StorageRepositor
           error: error instanceof Error ? error.message : 'Unknown VideoList upload error'
         };
       }
+    },
+
+    // 獲取 SRT 檔案
+    getSrt: async (videoId: string, language: string): Promise<string | null> => {
+      const tempDir = path.join(process.cwd(), 'uploads');
+      const normalizedLanguage = normalizeLanguageCode(language);
+      const remotePath = `${videoId}/${normalizedLanguage}/${videoId}.srt`;
+      const localPath = path.join(tempDir, `${videoId}-${normalizedLanguage}.srt`);
+      
+      try {
+        const downloaded = await downloadFromR2(remotePath, localPath);
+        if (!downloaded) {
+          console.log(`SRT not found: ${remotePath}`);
+          return null;
+        }
+        
+        const content = await readFile(localPath);
+        await deleteFile(localPath);
+        return content;
+      } catch (error) {
+        console.error(`Error getting SRT for ${videoId}/${language}:`, error);
+        return null;
+      }
+    },
+
+    // 上傳分段索引 (segments.json)
+    uploadSegments: async (segments, videoId: string, language: string): Promise<UploadResult> => {
+      const tempDir = path.join(process.cwd(), 'uploads');
+      const normalizedLanguage = normalizeLanguageCode(language);
+      const localPath = path.join(tempDir, `${videoId}-${normalizedLanguage}-segments.json`);
+      
+      try {
+        await writeFile(localPath, JSON.stringify(segments, null, 2));
+        
+        const remotePath = `${videoId}/${normalizedLanguage}/segments.json`;
+        const description = `Uploaded segments.json for ${videoId}/${normalizedLanguage}`;
+        const result = await uploadToR2(localPath, remotePath, description);
+        
+        await deleteFile(localPath);
+        return result;
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown segments upload error'
+        };
+      }
+    },
+
+    // 獲取分段索引
+    getSegments: async (videoId: string, language: string) => {
+      const tempDir = path.join(process.cwd(), 'uploads');
+      const normalizedLanguage = normalizeLanguageCode(language);
+      const remotePath = `${videoId}/${normalizedLanguage}/segments.json`;
+      const localPath = path.join(tempDir, `${videoId}-${normalizedLanguage}-segments.json`);
+      
+      try {
+        const downloaded = await downloadFromR2(remotePath, localPath);
+        if (!downloaded) {
+          console.log(`Segments not found: ${remotePath}`);
+          return null;
+        }
+        
+        const content = await readFile(localPath);
+        await deleteFile(localPath);
+        return JSON.parse(content);
+      } catch (error) {
+        console.error(`Error getting segments for ${videoId}/${language}:`, error);
+        return null;
+      }
+    },
+
+    // 上傳摘要 (summary.json)
+    uploadSummary: async (summary, videoId: string, language: string): Promise<UploadResult> => {
+      const tempDir = path.join(process.cwd(), 'uploads');
+      const normalizedLanguage = normalizeLanguageCode(language);
+      const localPath = path.join(tempDir, `${videoId}-${normalizedLanguage}-summary.json`);
+      
+      try {
+        await writeFile(localPath, JSON.stringify(summary, null, 2));
+        
+        const remotePath = `${videoId}/${normalizedLanguage}/summary.json`;
+        const description = `Uploaded summary.json for ${videoId}/${normalizedLanguage}`;
+        const result = await uploadToR2(localPath, remotePath, description);
+        
+        await deleteFile(localPath);
+        return result;
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown summary upload error'
+        };
+      }
+    },
+
+    // 獲取摘要
+    getSummary: async (videoId: string, language: string) => {
+      const tempDir = path.join(process.cwd(), 'uploads');
+      const normalizedLanguage = normalizeLanguageCode(language);
+      const remotePath = `${videoId}/${normalizedLanguage}/summary.json`;
+      const localPath = path.join(tempDir, `${videoId}-${normalizedLanguage}-summary.json`);
+      
+      try {
+        const downloaded = await downloadFromR2(remotePath, localPath);
+        if (!downloaded) {
+          console.log(`Summary not found: ${remotePath}`);
+          return null;
+        }
+        
+        const content = await readFile(localPath);
+        await deleteFile(localPath);
+        return JSON.parse(content);
+      } catch (error) {
+        console.error(`Error getting summary for ${videoId}/${language}:`, error);
+        return null;
+      }
+    },
+
+    // 批次上傳（SRT + segments + summary）
+    uploadLanguagePackage: async (videoId: string, language: string, files) => {
+      const results = {
+        srt: { success: false },
+        segments: { success: false },
+        summary: { success: false }
+      };
+      
+      try {
+        // 上傳 SRT
+        const normalizedLanguage = normalizeLanguageCode(language);
+        const srtResult = await uploadToR2(
+          files.srtPath,
+          `${videoId}/${normalizedLanguage}/${videoId}.srt`,
+          `Uploaded SRT for ${videoId}/${normalizedLanguage}`
+        );
+        results.srt = srtResult;
+        
+        // 上傳 segments
+        const tempDir = path.join(process.cwd(), 'uploads');
+        const segmentsPath = path.join(tempDir, `${videoId}-${normalizedLanguage}-segments-temp.json`);
+        await writeFile(segmentsPath, JSON.stringify(files.segments, null, 2));
+        const segmentsResult = await uploadToR2(
+          segmentsPath,
+          `${videoId}/${normalizedLanguage}/segments.json`,
+          `Uploaded segments for ${videoId}/${normalizedLanguage}`
+        );
+        await deleteFile(segmentsPath);
+        results.segments = segmentsResult;
+        
+        // 上傳 summary
+        const summaryPath = path.join(tempDir, `${videoId}-${normalizedLanguage}-summary-temp.json`);
+        await writeFile(summaryPath, JSON.stringify(files.summary, null, 2));
+        const summaryResult = await uploadToR2(
+          summaryPath,
+          `${videoId}/${normalizedLanguage}/summary.json`,
+          `Uploaded summary for ${videoId}/${normalizedLanguage}`
+        );
+        await deleteFile(summaryPath);
+        results.summary = summaryResult;
+        
+        const allSuccess = results.srt.success && results.segments.success && results.summary.success;
+        
+        return {
+          success: allSuccess,
+          remotePath: `${videoId}/${normalizedLanguage}/`,
+          note: `Uploaded ${allSuccess ? 'all' : 'some'} files for ${videoId}/${normalizedLanguage}`,
+          error: allSuccess ? undefined : 'Some uploads failed'
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown package upload error'
+        };
+      }
+    },
+
+    // 查詢可用語言
+    listAvailableLanguages: async (videoId: string): Promise<string[]> => {
+      // 這個方法需要列出 R2 中的目錄，暫時返回空陣列
+      // 實際實作需要使用 aws s3 ls 命令
+      console.warn('listAvailableLanguages not fully implemented yet');
+      return [];
     }
   };
 };

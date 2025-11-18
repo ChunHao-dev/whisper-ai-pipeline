@@ -292,6 +292,146 @@ export const createFileStorageRepository = (baseDir?: string): StorageRepository
           error: error instanceof Error ? error.message : 'Unknown VideoList save error'
         };
       }
+    },
+
+    // 獲取 SRT 檔案
+    getSrt: async (videoId: string, language: string): Promise<string | null> => {
+      const normalizedLanguage = normalizeLanguageCode(language);
+      const srtPath = path.join(finalBaseDir, 'srt', normalizedLanguage, `${videoId}.srt`);
+      
+      try {
+        if (!await fileExists(srtPath)) {
+          console.log(`SRT not found locally: ${srtPath}`);
+          return null;
+        }
+        return await readFile(srtPath);
+      } catch (error) {
+        console.error(`Error reading SRT for ${videoId}/${language}:`, error);
+        return null;
+      }
+    },
+
+    // 上傳分段索引
+    uploadSegments: async (segments, videoId: string, language: string): Promise<UploadResult> => {
+      const normalizedLanguage = normalizeLanguageCode(language);
+      const segmentsPath = path.join(finalBaseDir, 'srt', normalizedLanguage, `${videoId}-segments.json`);
+      
+      try {
+        await writeFile(segmentsPath, JSON.stringify(segments, null, 2));
+        return {
+          success: true,
+          remotePath: segmentsPath,
+          note: `Saved segments locally for ${videoId}/${normalizedLanguage}`
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown segments save error'
+        };
+      }
+    },
+
+    // 獲取分段索引
+    getSegments: async (videoId: string, language: string) => {
+      const normalizedLanguage = normalizeLanguageCode(language);
+      const segmentsPath = path.join(finalBaseDir, 'srt', normalizedLanguage, `${videoId}-segments.json`);
+      
+      try {
+        if (!await fileExists(segmentsPath)) {
+          console.log(`Segments not found locally: ${segmentsPath}`);
+          return null;
+        }
+        const content = await readFile(segmentsPath);
+        return JSON.parse(content);
+      } catch (error) {
+        console.error(`Error reading segments for ${videoId}/${language}:`, error);
+        return null;
+      }
+    },
+
+    // 上傳摘要
+    uploadSummary: async (summary, videoId: string, language: string): Promise<UploadResult> => {
+      const normalizedLanguage = normalizeLanguageCode(language);
+      const summaryPath = path.join(finalBaseDir, 'srt', normalizedLanguage, `${videoId}-summary.json`);
+      
+      try {
+        await writeFile(summaryPath, JSON.stringify(summary, null, 2));
+        return {
+          success: true,
+          remotePath: summaryPath,
+          note: `Saved summary locally for ${videoId}/${normalizedLanguage}`
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown summary save error'
+        };
+      }
+    },
+
+    // 獲取摘要
+    getSummary: async (videoId: string, language: string) => {
+      const normalizedLanguage = normalizeLanguageCode(language);
+      const summaryPath = path.join(finalBaseDir, 'srt', normalizedLanguage, `${videoId}-summary.json`);
+      
+      try {
+        if (!await fileExists(summaryPath)) {
+          console.log(`Summary not found locally: ${summaryPath}`);
+          return null;
+        }
+        const content = await readFile(summaryPath);
+        return JSON.parse(content);
+      } catch (error) {
+        console.error(`Error reading summary for ${videoId}/${language}:`, error);
+        return null;
+      }
+    },
+
+    // 批次上傳
+    uploadLanguagePackage: async (videoId: string, language: string, files) => {
+      const normalizedLanguage = normalizeLanguageCode(language);
+      
+      try {
+        // 上傳 SRT
+        const srtResult = await copyFile(
+          files.srtPath,
+          path.join('srt', normalizedLanguage, `${videoId}.srt`),
+          `Saved SRT for ${videoId}/${normalizedLanguage}`
+        );
+        
+        // 上傳 segments
+        const segmentsPath = path.join(finalBaseDir, 'srt', normalizedLanguage, `${videoId}-segments.json`);
+        await writeFile(segmentsPath, JSON.stringify(files.segments, null, 2));
+        
+        // 上傳 summary
+        const summaryPath = path.join(finalBaseDir, 'srt', normalizedLanguage, `${videoId}-summary.json`);
+        await writeFile(summaryPath, JSON.stringify(files.summary, null, 2));
+        
+        return {
+          success: srtResult.success,
+          remotePath: path.join(finalBaseDir, 'srt', normalizedLanguage),
+          note: `Saved all files locally for ${videoId}/${normalizedLanguage}`
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown package save error'
+        };
+      }
+    },
+
+    // 查詢可用語言
+    listAvailableLanguages: async (videoId: string): Promise<string[]> => {
+      const srtDir = path.join(finalBaseDir, 'srt');
+      try {
+        const languages = await fs.readdir(srtDir);
+        return languages.filter(async (lang) => {
+          const srtPath = path.join(srtDir, lang, `${videoId}.srt`);
+          return await fileExists(srtPath);
+        });
+      } catch {
+        return [];
+      }
     }
   };
 };
