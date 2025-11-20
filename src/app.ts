@@ -17,6 +17,11 @@ import {
   getBatchStatusController,
   listBatchJobsController,
 } from "./controllers/batch.controller";
+import {
+  checkR2StatusController,
+  getMissingDataController,
+  generateStatusReportController,
+} from "./controllers/r2Status.controller";
 import { socketConfig } from "./config/socket";
 import {
   setupTranscriptionHandler,
@@ -115,6 +120,17 @@ app.get("/api/batch/status/:jobId", getBatchStatusController);
 
 // 列出所有批次任務
 app.get("/api/batch/jobs", listBatchJobsController);
+
+// ==================== R2 狀態檢查 API ====================
+
+// 檢查 R2 上所有影片的狀態
+app.get("/api/r2/check-status", checkR2StatusController);
+
+// 獲取缺少資料的影片列表
+app.get("/api/r2/missing-data", getMissingDataController);
+
+// 生成詳細的狀態報告（Markdown 格式）
+app.get("/api/r2/status-report", generateStatusReportController);
 
 // MLX Whisper 健康檢查 API
 app.get("/api/mlx-health", async (req: Request, res: Response) => {
