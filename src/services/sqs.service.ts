@@ -8,6 +8,8 @@ import { WhisperParams } from '../types/whisper.types';
 import { WordSegment, combineWordsToSentences, generateSrtFromSentences, generateSrtFromSegments } from '../utils/sentence.utils';
 import { youtubeEmitter } from '../socket/handlers/youtube.handler';
 import { defaultStorageRepository } from '../infrastructure/repositories';
+import { segmentSrtUseCase } from '../usecases/segmentSrt.useCase';
+import { translateSrtUseCase } from '../usecases/translateSrt.useCase';
 
 const DEQUEUE_URL = 'https://n0fa1a9zo2.execute-api.ap-southeast-2.amazonaws.com/dequeue';
 const LONG_POLLING_INTERVAL = 10 * 60 * 1000; // 10 minutes
@@ -16,6 +18,18 @@ const SHORT_RETRY_INTERVAL = 15 * 1000; // 15 seconds
 // Whisper Engine Selection
 const WHISPER_ENGINE = process.env.WHISPER_ENGINE || 'whisper-cpp';
 console.log(`[SQS Processor] Using Whisper engine: ${WHISPER_ENGINE}`);
+
+// Auto Processing Configuration
+const AUTO_SEGMENT = process.env.SQS_AUTO_SEGMENT === 'true';
+const AUTO_TRANSLATE = process.env.SQS_AUTO_TRANSLATE === 'true';
+const TARGET_LANGUAGES = process.env.SQS_TARGET_LANGUAGES?.split(',').filter(Boolean) || [];
+const SEGMENT_COUNT = parseInt(process.env.SQS_SEGMENT_COUNT || '6', 10);
+const AI_SERVICE = (process.env.SQS_AI_SERVICE || 'gemini') as 'gemini' | 'openai';
+
+console.log(`[SQS Processor] Auto Segment: ${AUTO_SEGMENT}`);
+console.log(`[SQS Processor] Auto Translate: ${AUTO_TRANSLATE}`);
+console.log(`[SQS Processor] Target Languages: ${TARGET_LANGUAGES.join(', ') || 'none'}`);
+console.log(`[SQS Processor] AI Service: ${AI_SERVICE}`);
 
 /**
  * Fetches a message from the SQS queue via API Gateway.
@@ -216,7 +230,57 @@ async function processQueue(): Promise<void> {
             // VideoList 更新失敗不影響 SRT 上傳成功的狀態
           }
           
-          // Delete local SRT file after successful upload using Repository
+          // 6. Auto Segmentation (if enabled)
+          if (AUTO_SEGMENT) {
+            try {
+              console.log(`[${jobId}] Starting auto segmentation...`);
+              
+              const segmentResult = await segmentSrtUseCase(
+                defaultStorageRepository,
+                videoId,
+                detectedLanguage,
+                srtContent,  // 使用記憶體中的 SRT 內容
+                {
+                  targetSegmentCount: SEGMENT_COUNT,
+                  aiService: AI_SERVICE
+                }
+              );
+              
+              console.log(`[${jobId}] Auto segmentation completed: ${segmentResult.segments.metadata.totalSegments} segments`);
+            } catch (segmentError) {
+              console.error(`[${jobId}] Auto segmentation failed:`, segmentError);
+              // 分段失敗不影響翻譯
+            }
+          }
+
+          // 7. Auto Translation (if enabled)
+          if (AUTO_TRANSLATE && TARGET_LANGUAGES.length > 0) {
+            try {
+              console.log(`[${jobId}] Starting auto translation to: ${TARGET_LANGUAGES.join(', ')}`);
+              
+              for (const targetLang of TARGET_LANGUAGES) {
+                try {
+                  console.log(`[${jobId}] Translating to ${targetLang}...`);
+                  await translateSrtUseCase(
+                    defaultStorageRepository,
+                    videoId,
+                    detectedLanguage,
+                    targetLang,
+                    { aiService: AI_SERVICE }
+                  );
+                  console.log(`[${jobId}] Translation to ${targetLang} completed`);
+                } catch (translateError) {
+                  console.error(`[${jobId}] Failed to translate to ${targetLang}:`, translateError);
+                  // 繼續翻譯其他語言
+                }
+              }
+            } catch (translateError) {
+              console.error(`[${jobId}] Auto translation failed:`, translateError);
+              // 翻譯失敗不影響轉錄成功
+            }
+          }
+
+          // 8. Delete local SRT file after all processing
           try {
             await defaultStorageRepository.deleteFile(srtOutputPath);
             console.log(`[${jobId}] Cleaned up local SRT file: ${srtOutputPath}`);

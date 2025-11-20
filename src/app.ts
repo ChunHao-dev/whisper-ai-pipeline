@@ -8,6 +8,15 @@ import { Server } from "socket.io";
 import { createServer } from "http";
 import { transcribeFile, transcribeYoutube, youtubeToSrt, transcribeMlx, transcribeYoutubeMlx } from "./controllers/transcription.controller";
 import { segmentSrtController, translateSrtController, getSegmentationController, getSrtController } from "./controllers/srt.controller";
+import {
+  checkVideoStatusController,
+  processVideoController,
+  batchProcessController,
+  batchProcessFromR2Controller,
+  batchProcessFromFileController,
+  getBatchStatusController,
+  listBatchJobsController,
+} from "./controllers/batch.controller";
 import { socketConfig } from "./config/socket";
 import {
   setupTranscriptionHandler,
@@ -83,6 +92,29 @@ app.get("/api/srt/segmentation/:videoId/:language", getSegmentationController);
 
 // 獲取 SRT 內容 API
 app.get("/api/srt/:videoId/:language", getSrtController);
+
+// ==================== 批次處理 API ====================
+
+// 檢查單個影片狀態
+app.get("/api/batch/check/:videoId", checkVideoStatusController);
+
+// 處理單個影片
+app.post("/api/batch/process", processVideoController);
+
+// 批次處理多個影片
+app.post("/api/batch/process-multiple", batchProcessController);
+
+// 從 R2 批次處理（讀取 VideoList.json）
+app.post("/api/batch/process-from-r2", batchProcessFromR2Controller);
+
+// 從本地 JSON 檔案批次處理
+app.post("/api/batch/process-from-file", batchProcessFromFileController);
+
+// 取得批次任務狀態
+app.get("/api/batch/status/:jobId", getBatchStatusController);
+
+// 列出所有批次任務
+app.get("/api/batch/jobs", listBatchJobsController);
 
 // MLX Whisper 健康檢查 API
 app.get("/api/mlx-health", async (req: Request, res: Response) => {

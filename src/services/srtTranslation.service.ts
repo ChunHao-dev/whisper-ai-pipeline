@@ -10,6 +10,25 @@ import {
 } from '../types/srt.types';
 import { parseSRT, entriesToSRT } from '../utils/srt.utils';
 
+// ==================== 語言映射 ====================
+
+const getLanguageName = (langCode: string): string => {
+  const languageMap: Record<string, string> = {
+    'zh': 'Traditional Chinese (繁體中文)',
+    'zh-TW': 'Traditional Chinese (繁體中文)',
+    'zh-CN': 'Simplified Chinese (简体中文)',
+    'zh-HK': 'Traditional Chinese (繁體中文)',
+    'ja': 'Japanese (日本語)',
+    'ko': 'Korean (한국어)',
+    'en': 'English',
+    'es': 'Spanish',
+    'fr': 'French',
+    'de': 'German',
+  };
+  
+  return languageMap[langCode] || langCode;
+};
+
 // ==================== 提示詞構建 ====================
 
 const buildTranslationPrompt = (
@@ -19,8 +38,9 @@ const buildTranslationPrompt = (
   targetLanguage: string
 ): string => {
   const entriesText = entries.map(e => `[${e.index}] ${e.text}`).join('\n');
+  const languageName = getLanguageName(targetLanguage);
   
-  return `Translate the following subtitle entries to ${targetLanguage}.
+  return `Translate the following subtitle entries to ${languageName}.
 
 CONTEXT:
 Overall Summary: ${overallSummary}
@@ -52,8 +72,9 @@ const buildSummaryTranslationPrompt = (
   const segmentsText = summary.segmentSummaries
     .map(s => `[${s.segmentId}] ${s.topic}\n${s.summary}`)
     .join('\n\n');
+  const languageName = getLanguageName(targetLanguage);
   
-  return `Translate the following content summary to ${targetLanguage}.
+  return `Translate the following content summary to ${languageName}.
 
 OVERALL SUMMARY:
 ${summary.overallSummary}
@@ -84,10 +105,10 @@ const callGeminiTranslation = async (
 ): Promise<any> => {
   const localEndpoint = process.env.GEMINI_LOCAL_ENDPOINT;
   
-  // 使用 gemini-2.5-flash
+  // 使用 gemini-2.5-flash-lite（免費版本，速率限制更寬鬆）
   const url = localEndpoint 
-    ? `${localEndpoint}/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`
-    : `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    ? `${localEndpoint}/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`
+    : `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`;
   
   const response = await fetch(url, {
     method: 'POST',

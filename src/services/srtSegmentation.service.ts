@@ -16,6 +16,38 @@ import { parseSRT } from '../utils/srt.utils';
 // ==================== 純函數：提示詞構建 ====================
 
 /**
+ * 根據逐字稿長度計算建議的摘要長度
+ */
+const calculateSummaryLength = (entryCount: number): { overall: string; segment: string } => {
+  // 根據逐字稿條目數量動態調整（縮短版本）
+  if (entryCount < 30) {
+    // 短影片（< 5 分鐘）
+    return {
+      overall: '1-2 sentences (30-50 words)',
+      segment: '1 sentence (20-30 words)'
+    };
+  } else if (entryCount < 100) {
+    // 中等影片（5-15 分鐘）
+    return {
+      overall: '2-3 sentences (50-80 words)',
+      segment: '1-2 sentences (30-50 words)'
+    };
+  } else if (entryCount < 200) {
+    // 長影片（15-30 分鐘）
+    return {
+      overall: '3-4 sentences (80-120 words)',
+      segment: '2-3 sentences (50-80 words)'
+    };
+  } else {
+    // 超長影片（> 30 分鐘）
+    return {
+      overall: '4-5 sentences (120-180 words)',
+      segment: '3-4 sentences (80-120 words)'
+    };
+  }
+};
+
+/**
  * 構建分段提示詞
  */
 const buildSegmentationPrompt = (
@@ -29,6 +61,9 @@ const buildSegmentationPrompt = (
   // 組合所有文本
   const fullText = parsed.entries.map(e => `[${e.index}] ${e.text}`).join('\n');
   
+  // 根據逐字稿長度計算摘要長度
+  const summaryLengths = calculateSummaryLength(parsed.entryCount);
+  
   return `You are an expert content analyst. Analyze the following transcript and segment it into ${targetCount} meaningful sections.
 
 TRANSCRIPT (${parsed.entryCount} entries):
@@ -38,8 +73,8 @@ REQUIREMENTS:
 1. Create ${targetCount} segments that represent natural topic boundaries
 2. Each segment should have ${minLength}-${maxLength} entries
 3. Provide a clear topic title for each segment
-4. Write a 2-3 sentence summary for each segment
-5. Provide an overall summary of the entire content (3-4 sentences)
+4. Write a segment summary: ${summaryLengths.segment}
+5. Provide an overall summary of the entire content: ${summaryLengths.overall}
 6. Ensure all entries are covered (no gaps or overlaps)
 
 RESPONSE FORMAT (JSON):
@@ -66,10 +101,10 @@ Respond ONLY with valid JSON, no additional text.`;
 const callGemini = async (prompt: string, apiKey: string): Promise<AISegmentationResponse> => {
   const localEndpoint = process.env.GEMINI_LOCAL_ENDPOINT;
   
-  // 使用 gemini-2.5-flash
+  // 使用 gemini-2.5-flash-lite（免費版本，速率限制更寬鬆）
   const url = localEndpoint 
-    ? `${localEndpoint}/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`
-    : `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    ? `${localEndpoint}/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`
+    : `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`;
   
   const response = await fetch(url, {
     method: 'POST',
