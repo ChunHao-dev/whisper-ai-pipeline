@@ -151,7 +151,14 @@ async function processQueue(): Promise<void> {
 
           srtContent = mlxResult.srtContent;
           detectedLanguage = 'auto'; // Force use 'default' for consistent R2 path structure
-          console.log(`[${jobId}] MLX Whisper transcription finished. Generated SRT content length: ${srtContent.length} language : ${detectedLanguage}`);
+          
+          // Record detected language in videoInfo for future reference
+          if (mlxResult.language && mlxResult.language !== 'unknown') {
+            videoInfo.detectedLanguage = mlxResult.language;
+            console.log(`[${jobId}] MLX detected language: ${mlxResult.language}`);
+          }
+          
+          console.log(`[${jobId}] MLX Whisper transcription finished. Generated SRT content length: ${srtContent.length}`);
 
         } else {
           // Use WhisperCPP (default)
@@ -296,7 +303,7 @@ async function processQueue(): Promise<void> {
         console.error(`[${jobId}] Failed to process video ID ${videoId}:`, jobError);
         youtubeEmitter.emitError(jobId, jobError instanceof Error ? jobError : new Error('Unknown processing error'));
       } finally {
-        // 6. Cleanup using Repository
+        // 9. Cleanup using Repository
         if (audioFilePath) {
           try {
             await defaultStorageRepository.deleteFile(audioFilePath);

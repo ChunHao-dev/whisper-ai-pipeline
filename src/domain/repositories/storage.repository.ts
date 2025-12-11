@@ -23,6 +23,7 @@ export interface VideoInfo {
   title?: string;
   duration?: number;
   uploadDate?: string;
+  detectedLanguage?: string;          // MLX Whisper 偵測到的原始語言
   availableLanguages?: string[];      // 可用的語言列表
   hasSegmentation?: boolean;          // 是否已分段
   segmentationLanguages?: string[];   // 哪些語言有分段資訊

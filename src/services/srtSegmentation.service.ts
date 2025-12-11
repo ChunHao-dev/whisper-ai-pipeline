@@ -116,7 +116,7 @@ const callGemini = async (prompt: string, apiKey: string): Promise<AISegmentatio
       }],
       generationConfig: {
         temperature: 0.2,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 16000,
         responseMimeType: "application/json"
       }
     })
@@ -132,8 +132,19 @@ const callGemini = async (prompt: string, apiKey: string): Promise<AISegmentatio
   
   console.log('[Gemini] Response (first 300 chars):', text.substring(0, 300));
   
-  // 直接解析 JSON（因為設定了 responseMimeType）
-  return JSON.parse(text);
+  try {
+    return JSON.parse(text);
+  } catch (parseError) {
+    console.error('=== GEMINI SEGMENTATION JSON PARSE ERROR ===');
+    console.error('Error:', parseError);
+    console.error('Raw Gemini Response:');
+    console.error(text);
+    console.error('Response length:', text.length);
+    console.error('Error position:', parseError instanceof SyntaxError ? parseError.message : 'Unknown');
+    console.error('============================================');
+    
+    throw new Error(`Gemini segmentation JSON parse failed: ${parseError instanceof Error ? parseError.message : 'Unknown error'}\nResponse preview: ${text.substring(0, 500)}...`);
+  }
 };
 
 /**
@@ -164,7 +175,21 @@ const callOpenAI = async (prompt: string, apiKey: string): Promise<AISegmentatio
   }
 
   const data = await response.json();
-  return JSON.parse(data.choices[0].message.content);
+  const content = data.choices[0].message.content;
+  
+  try {
+    return JSON.parse(content);
+  } catch (parseError) {
+    console.error('=== OPENAI SEGMENTATION JSON PARSE ERROR ===');
+    console.error('Error:', parseError);
+    console.error('Raw OpenAI Response:');
+    console.error(content);
+    console.error('Response length:', content.length);
+    console.error('Error position:', parseError instanceof SyntaxError ? parseError.message : 'Unknown');
+    console.error('===========================================');
+    
+    throw new Error(`OpenAI segmentation JSON parse failed: ${parseError instanceof Error ? parseError.message : 'Unknown error'}\nResponse preview: ${content.substring(0, 500)}...`);
+  }
 };
 
 /**
@@ -281,7 +306,30 @@ export const segmentSRT = async (
   // 3. 調用 AI 進行分段
   const aiResponse = await callAI(prompt, aiService);
   
-  // 4. 構建 segments.json
+  // 4. 驗證分段覆蓋率
+  const coveredIndices = new Set<number>();
+  for (const segment of aiResponse.segments) {
+    for (let i = segment.startIndex; i <= segment.endIndex; i++) {
+      coveredIndices.add(i);
+    }
+  }
+  
+  const allIndices = new Set(parsed.entries.map(e => e.index));
+  const missingIndices = [...allIndices].filter(i => !coveredIndices.has(i));
+  const duplicateIndices = [...coveredIndices].filter(i => !allIndices.has(i));
+  
+  if (missingIndices.length > 0) {
+    console.warn(`[Segmentation] Warning: ${missingIndices.length} entries not covered by AI segmentation:`, missingIndices);
+  }
+  
+  if (duplicateIndices.length > 0) {
+    console.warn(`[Segmentation] Warning: ${duplicateIndices.length} invalid indices in AI response:`, duplicateIndices);
+  }
+  
+  const coverageRate = (coveredIndices.size / allIndices.size) * 100;
+  console.log(`[Segmentation] Coverage rate: ${coverageRate.toFixed(1)}% (${coveredIndices.size}/${allIndices.size})`);
+  
+  // 5. 構建 segments.json
   const segments = buildSegmentsFile(
     videoId,
     language,
@@ -290,7 +338,7 @@ export const segmentSRT = async (
     startTime
   );
   
-  // 5. 構建 summary.json
+  // 6. 構建 summary.json
   const summary = buildSummaryFile(
     videoId,
     language,

@@ -84,7 +84,7 @@ const executePythonScript = (
   args: string[],
   options: { timeout?: number } = {}
 ): Promise<MLXWhisperResponse> => {
-  const { timeout = 300000 } = options; // 5分鐘預設超時
+  const { timeout = 1800000 } = options; // 30分鐘預設超時
 
   return new Promise((resolve, reject) => {
     const childProcess = spawn(config.pythonPath, args, {

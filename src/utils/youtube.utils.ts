@@ -3,17 +3,7 @@ import fs from "fs/promises";
 import path from "path";
 import { youtubeEmitter } from "../socket/handlers/youtube.handler";
 import { getOptimizedBrowserList } from "../config/youtube.config";
-interface VideoInfo {
-  duration: number;
-  title: string;
-  id: string;
-  thumbnail?: string;
-  description?: string;
-  uploader?: string;
-  upload_date?: string;
-  view_count?: number;
-  webpage_url?: string;
-}
+import { VideoInfo } from "../domain/repositories/storage.repository.js";
 
 /**
  * 執行命令並返回結果
@@ -118,13 +108,13 @@ async function getVideoInfoWithCookies(url: string): Promise<VideoInfo> {
 
       console.log(`使用 ${browser} 瀏覽器成功獲取影片資訊`);
       return {
-        duration: jsonResult.duration,
-        title: jsonResult.title,
         id: jsonResult.id,
+        title: jsonResult.title,
+        duration: jsonResult.duration,
+        uploadDate: jsonResult.upload_date,
         thumbnail: jsonResult.thumbnail,
         description: jsonResult.description,
         uploader: jsonResult.uploader,
-        upload_date: jsonResult.upload_date,
         view_count: jsonResult.view_count,
         webpage_url: jsonResult.webpage_url
       };
@@ -171,13 +161,13 @@ async function getVideoInfoWithUserAgent(url: string): Promise<VideoInfo> {
 
       console.log('用戶代理偽裝成功獲取影片資訊');
       return {
-        duration: jsonResult.duration,
-        title: jsonResult.title,
         id: jsonResult.id,
+        title: jsonResult.title,
+        duration: jsonResult.duration,
+        uploadDate: jsonResult.upload_date,
         thumbnail: jsonResult.thumbnail,
         description: jsonResult.description,
         uploader: jsonResult.uploader,
-        upload_date: jsonResult.upload_date,
         view_count: jsonResult.view_count,
         webpage_url: jsonResult.webpage_url
       };
@@ -214,13 +204,13 @@ async function getVideoInfoBasic(url: string): Promise<VideoInfo> {
 
   console.log('基本方法成功獲取影片資訊');
   return {
-    duration: jsonResult.duration,
-    title: jsonResult.title,
     id: jsonResult.id,
+    title: jsonResult.title,
+    duration: jsonResult.duration,
+    uploadDate: jsonResult.upload_date,
     thumbnail: jsonResult.thumbnail,
     description: jsonResult.description,
     uploader: jsonResult.uploader,
-    upload_date: jsonResult.upload_date,
     view_count: jsonResult.view_count,
     webpage_url: jsonResult.webpage_url
   };
@@ -242,8 +232,8 @@ export const downloadAndProcessYoutube = async (
     // 2. 通知前端資訊
     youtubeEmitter.emitSegmentsInfo(jobId, {
       totalSegments: 1,
-      segmentDuration: info.duration,
-      totalDuration: info.duration
+      segmentDuration: info.duration || 0,
+      totalDuration: info.duration || 0
     });
 
     const videoId = info.id

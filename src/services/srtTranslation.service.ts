@@ -134,8 +134,19 @@ const callGeminiTranslation = async (
   const data = await response.json();
   const text = data.candidates[0].content.parts[0].text;
   
-  // 直接解析 JSON
-  return JSON.parse(text);
+  try {
+    return JSON.parse(text);
+  } catch (parseError) {
+    console.error('=== GEMINI TRANSLATION JSON PARSE ERROR ===');
+    console.error('Error:', parseError);
+    console.error('Raw Gemini Response:');
+    console.error(text);
+    console.error('Response length:', text.length);
+    console.error('Error position:', parseError instanceof SyntaxError ? parseError.message : 'Unknown');
+    console.error('==========================================');
+    
+    throw new Error(`Gemini translation JSON parse failed: ${parseError instanceof Error ? parseError.message : 'Unknown error'}\nResponse preview: ${text.substring(0, 500)}...`);
+  }
 };
 
 const callOpenAITranslation = async (
@@ -164,7 +175,21 @@ const callOpenAITranslation = async (
   if (!response.ok) throw new Error(`OpenAI API error: ${response.statusText}`);
   
   const data = await response.json();
-  return JSON.parse(data.choices[0].message.content);
+  const content = data.choices[0].message.content;
+  
+  try {
+    return JSON.parse(content);
+  } catch (parseError) {
+    console.error('=== OPENAI TRANSLATION JSON PARSE ERROR ===');
+    console.error('Error:', parseError);
+    console.error('Raw OpenAI Response:');
+    console.error(content);
+    console.error('Response length:', content.length);
+    console.error('Error position:', parseError instanceof SyntaxError ? parseError.message : 'Unknown');
+    console.error('==========================================');
+    
+    throw new Error(`OpenAI translation JSON parse failed: ${parseError instanceof Error ? parseError.message : 'Unknown error'}\nResponse preview: ${content.substring(0, 500)}...`);
+  }
 };
 
 const callAITranslation = async (
@@ -203,7 +228,22 @@ export const translateSRT = async (
   const summaryPrompt = buildSummaryTranslationPrompt(summary, targetLanguage);
   const translatedSummaryData = await callAITranslation(summaryPrompt, aiService);
   
-  // 2. 逐段翻譯 SRT
+  // 2. 檢查分段覆蓋率
+  const coveredIndices = new Set<number>();
+  for (const segment of segments.segments) {
+    for (let i = segment.startIndex; i <= segment.endIndex; i++) {
+      coveredIndices.add(i);
+    }
+  }
+  
+  const allIndices = new Set(parsed.entries.map(e => e.index));
+  const missingIndices = [...allIndices].filter(i => !coveredIndices.has(i));
+  
+  if (missingIndices.length > 0) {
+    console.warn(`[Translation] Warning: ${missingIndices.length} entries not covered by segments:`, missingIndices);
+  }
+  
+  // 3. 逐段翻譯 SRT
   const translatedEntries: SRTEntry[] = [];
   
   for (const segment of segments.segments) {
@@ -234,7 +274,36 @@ export const translateSRT = async (
     console.log(`[Translation] Translated segment ${segment.id}`);
   }
   
-  // 3. 構建翻譯後的檔案
+  // 4. 處理未被分段覆蓋的條目
+  if (missingIndices.length > 0) {
+    const missingEntries = parsed.entries.filter(e => missingIndices.includes(e.index));
+    
+    console.log(`[Translation] Translating ${missingEntries.length} missing entries separately`);
+    
+    const missingPrompt = buildTranslationPrompt(
+      missingEntries,
+      summary.overallSummary,
+      "Miscellaneous content", // 通用主題
+      targetLanguage
+    );
+    
+    const missingResult = await callAITranslation(missingPrompt, aiService);
+    
+    // 合併遺漏條目的翻譯結果
+    for (const trans of missingResult.translations) {
+      const originalEntry = missingEntries.find(e => e.index === trans.index);
+      if (originalEntry) {
+        translatedEntries.push({
+          ...originalEntry,
+          text: trans.text
+        });
+      }
+    }
+    
+    console.log(`[Translation] Completed translation of missing entries`);
+  }
+  
+  // 5. 構建翻譯後的檔案
   const translatedSRT = entriesToSRT(translatedEntries);
   
   const translatedSegments: SegmentsFile = {
