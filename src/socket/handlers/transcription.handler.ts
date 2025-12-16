@@ -42,7 +42,8 @@ const handleTranscriptionStart = async (socket: Socket, params: Omit<WhisperPara
     console.log('開始轉錄任務:', socket.id);
     emitToJob(socket.id, EVENTS.TRANSCRIPTION.START, { jobId: socket.id });
 
-    const transcriptionParams: WhisperParams = {
+    // 修正模型路徑 - 使用相對路徑
+    const correctedParams: WhisperParams = {
       ...params,
       progress_callback: (progress: number) => {
         const progressData: TranscriptionProgressData = {
@@ -54,7 +55,8 @@ const handleTranscriptionStart = async (socket: Socket, params: Omit<WhisperPara
       }
     };
 
-    const result = await whisperService.transcribe(transcriptionParams);
+    console.log('開始轉錄，參數:', correctedParams);
+    const result = await whisperService.transcribe(correctedParams);
     
     const completeData: TranscriptionCompleteData = {
       jobId: socket.id,

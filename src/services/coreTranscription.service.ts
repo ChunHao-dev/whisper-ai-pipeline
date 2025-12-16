@@ -37,7 +37,7 @@ export const coreTranscriptionLogic = async (
     const params: WhisperParams = {
       language,
       model: join(process.cwd(), "models/ggml-large-v3-turbo.bin"),
-      use_gpu: true,
+      use_gpu: false,
       fname_inp: filePath,
       no_prints: true,
       flash_attn: false,

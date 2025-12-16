@@ -103,12 +103,10 @@ const callGeminiTranslation = async (
   prompt: string,
   apiKey: string
 ): Promise<any> => {
-  const localEndpoint = process.env.GEMINI_LOCAL_ENDPOINT;
+  // const localEndpoint = process.env.GEMINI_LOCAL_ENDPOINT;
   
   // 使用 gemini-2.5-flash-lite（免費版本，速率限制更寬鬆）
-  const url = localEndpoint 
-    ? `${localEndpoint}/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`
-    : `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`;
   
   const response = await fetch(url, {
     method: 'POST',
