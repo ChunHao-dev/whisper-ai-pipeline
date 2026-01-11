@@ -72,3 +72,33 @@ uv.lock
 project_plan_2025-08-26.md
 project_summary_2025-08-26.md
 docs/sqs-processing-plan.md
+# Large model files
+models/
+*.bin
+*.mlmodelc/
+
+# Python virtual environment
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Upload files and temporary data
+uploads/
+*.wav
+*.mp4
+*.part
+
+# Video data and metadata
+VideoList_R2.json
+VideoList*.json
+missing-*.json
+
+# Node modules (should already be ignored)
+node_modules/
+
+# Temporary files
+*.tmp
+*.temp
+*.ytdl
