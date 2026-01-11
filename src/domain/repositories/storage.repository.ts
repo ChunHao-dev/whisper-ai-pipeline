@@ -77,6 +77,10 @@ export interface StorageRepository {
   addVideoToList(videoInfo: VideoInfo): Promise<VideoInfo[]>;
   uploadVideoList(videoList: VideoInfo[]): Promise<UploadResult>;
   
+  // 語言分析操作
+  uploadLanguageAnalysis(videoId: string, analysisData: any): Promise<UploadResult>;
+  downloadLanguageAnalysis(videoId: string): Promise<any | null>;
+  
   // 工具函數
   formatFileSize(bytes: number): string;
   getFileSize(filePath: string): Promise<number | null>;

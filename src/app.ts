@@ -27,6 +27,11 @@ import {
   setupTranscriptionHandler,
 } from "./socket/handlers/transcription.handler";
 import { mlxWhisperService } from "./services/mlx-whisper.service";
+import { 
+  batchAnalyzeLanguageLevelController,
+  getLanguageAnalysisController,
+  getLanguageAnalysisStatsController
+} from "./controllers/languageAnalysis.controller";
 
 const app = express();
 const httpServer = createServer(app);
@@ -131,6 +136,17 @@ app.get("/api/r2/missing-data", getMissingDataController);
 
 // 生成詳細的狀態報告（Markdown 格式）
 app.get("/api/r2/status-report", generateStatusReportController);
+
+// ==================== 語言分級分析 API ====================
+
+// 批次分析語言難度
+app.post("/api/batch-analyze-language-level", batchAnalyzeLanguageLevelController);
+
+// 取得語言分析統計資訊 (必須在 :videoId 路由之前)
+app.get("/api/language-analysis/stats", getLanguageAnalysisStatsController);
+
+// 取得單一影片的語言分析結果
+app.get("/api/language-analysis/:videoId", getLanguageAnalysisController);
 
 // MLX Whisper 健康檢查 API
 app.get("/api/mlx-health", async (req: Request, res: Response) => {

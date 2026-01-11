@@ -432,6 +432,51 @@ export const createFileStorageRepository = (baseDir?: string): StorageRepository
       } catch {
         return [];
       }
+    },
+
+    // ==================== 語言分析相關方法 ====================
+
+    // 上傳語言分析結果
+    uploadLanguageAnalysis: async (videoId: string, analysisData: any): Promise<UploadResult> => {
+      const analysisPath = path.join(finalBaseDir, 'metadata', `${videoId}-language-analysis.json`);
+      
+      try {
+        // 確保目錄存在
+        const metadataDir = path.join(finalBaseDir, 'metadata');
+        await fs.mkdir(metadataDir, { recursive: true });
+        
+        // 寫入分析結果
+        await writeFile(analysisPath, JSON.stringify(analysisData, null, 2));
+        
+        return {
+          success: true,
+          remotePath: analysisPath,
+          note: `Saved language analysis locally for ${videoId}`
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown language analysis save error'
+        };
+      }
+    },
+
+    // 下載語言分析結果
+    downloadLanguageAnalysis: async (videoId: string): Promise<any | null> => {
+      const analysisPath = path.join(finalBaseDir, 'metadata', `${videoId}-language-analysis.json`);
+      
+      try {
+        if (!await fileExists(analysisPath)) {
+          console.log(`Language analysis not found locally: ${analysisPath}`);
+          return null;
+        }
+        
+        const content = await readFile(analysisPath);
+        return JSON.parse(content);
+      } catch (error) {
+        console.error(`Error reading language analysis for ${videoId}:`, error);
+        return null;
+      }
     }
   };
 };

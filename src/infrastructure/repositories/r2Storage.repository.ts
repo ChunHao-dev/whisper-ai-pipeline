@@ -590,6 +590,62 @@ export const createR2StorageRepository = (bucketName?: string): StorageRepositor
       // 實際實作需要使用 aws s3 ls 命令
       console.warn('listAvailableLanguages not fully implemented yet');
       return [];
+    },
+
+    // ==================== 語言分析相關方法 ====================
+
+    // 上傳語言分析結果
+    uploadLanguageAnalysis: async (videoId: string, analysisData: any): Promise<UploadResult> => {
+      const tempDir = path.join(process.cwd(), 'uploads');
+      const localPath = path.join(tempDir, `${videoId}-language-analysis.json`);
+      
+      try {
+        // 寫入本地臨時檔案
+        await writeFile(localPath, JSON.stringify(analysisData, null, 2));
+        
+        const remotePath = `${videoId}/metadata/language-analysis.json`;
+        const description = `Uploaded language analysis for ${videoId}`;
+        const result = await uploadToR2(localPath, remotePath, description);
+        
+        // 清理本地檔案
+        await deleteFile(localPath);
+        
+        return result;
+      } catch (error) {
+        // 確保清理本地檔案
+        try {
+          await deleteFile(localPath);
+        } catch (cleanupError) {
+          console.error('Failed to cleanup language analysis temp file:', cleanupError);
+        }
+        
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown language analysis upload error'
+        };
+      }
+    },
+
+    // 下載語言分析結果
+    downloadLanguageAnalysis: async (videoId: string): Promise<any | null> => {
+      const tempDir = path.join(process.cwd(), 'uploads');
+      const remotePath = `${videoId}/metadata/language-analysis.json`;
+      const localPath = path.join(tempDir, `${videoId}-language-analysis.json`);
+      
+      try {
+        const downloaded = await downloadFromR2(remotePath, localPath);
+        if (!downloaded) {
+          console.log(`Language analysis not found: ${remotePath}`);
+          return null;
+        }
+        
+        const content = await readFile(localPath);
+        await deleteFile(localPath);
+        return JSON.parse(content);
+      } catch (error) {
+        console.error(`Error getting language analysis for ${videoId}:`, error);
+        return null;
+      }
     }
   };
 };

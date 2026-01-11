@@ -10,6 +10,7 @@ import { youtubeEmitter } from '../socket/handlers/youtube.handler';
 import { defaultStorageRepository } from '../infrastructure/repositories';
 import { segmentSrtUseCase } from '../usecases/segmentSrt.useCase';
 import { translateSrtUseCase } from '../usecases/translateSrt.useCase';
+import { analyzeLanguageLevelFromMemory } from '../usecases/analyzeLanguageLevelFromMemory.useCase';
 
 const DEQUEUE_URL = 'https://n0fa1a9zo2.execute-api.ap-southeast-2.amazonaws.com/dequeue';
 const LONG_POLLING_INTERVAL = 10 * 60 * 1000; // 10 minutes
@@ -22,12 +23,14 @@ console.log(`[SQS Processor] Using Whisper engine: ${WHISPER_ENGINE}`);
 // Auto Processing Configuration
 const AUTO_SEGMENT = process.env.SQS_AUTO_SEGMENT === 'true';
 const AUTO_TRANSLATE = process.env.SQS_AUTO_TRANSLATE === 'true';
+const AUTO_LANGUAGE_ANALYSIS = process.env.SQS_AUTO_LANGUAGE_ANALYSIS === 'true';
 const TARGET_LANGUAGES = process.env.SQS_TARGET_LANGUAGES?.split(',').filter(Boolean) || [];
 const SEGMENT_COUNT = parseInt(process.env.SQS_SEGMENT_COUNT || '6', 10);
 const AI_SERVICE = (process.env.SQS_AI_SERVICE || 'gemini') as 'gemini' | 'openai';
 
 console.log(`[SQS Processor] Auto Segment: ${AUTO_SEGMENT}`);
 console.log(`[SQS Processor] Auto Translate: ${AUTO_TRANSLATE}`);
+console.log(`[SQS Processor] Auto Language Analysis: ${AUTO_LANGUAGE_ANALYSIS}`);
 console.log(`[SQS Processor] Target Languages: ${TARGET_LANGUAGES.join(', ') || 'none'}`);
 console.log(`[SQS Processor] AI Service: ${AI_SERVICE}`);
 
@@ -287,7 +290,27 @@ async function processQueue(): Promise<void> {
             }
           }
 
-          // 8. Delete local SRT file after all processing
+          // 8. Auto Language Analysis (if enabled)
+          if (AUTO_LANGUAGE_ANALYSIS) {
+            try {
+              console.log(`[${jobId}] Starting auto language analysis...`);
+              
+              const analysisResult = await analyzeLanguageLevelFromMemory(
+                defaultStorageRepository,
+                videoId,
+                detectedLanguage,
+                srtContent,  // 使用記憶體中的 SRT 內容
+                { aiService: AI_SERVICE }
+              );
+              
+              console.log(`[${jobId}] Language analysis completed: ${analysisResult.overallLevel} (confidence: ${analysisResult.confidence})`);
+            } catch (analysisError) {
+              console.error(`[${jobId}] Auto language analysis failed:`, analysisError);
+              // 分析失敗不影響轉錄成功
+            }
+          }
+
+          // 9. Delete local SRT file after all processing
           try {
             await defaultStorageRepository.deleteFile(srtOutputPath);
             console.log(`[${jobId}] Cleaned up local SRT file: ${srtOutputPath}`);
@@ -303,7 +326,7 @@ async function processQueue(): Promise<void> {
         console.error(`[${jobId}] Failed to process video ID ${videoId}:`, jobError);
         youtubeEmitter.emitError(jobId, jobError instanceof Error ? jobError : new Error('Unknown processing error'));
       } finally {
-        // 9. Cleanup using Repository
+        // 10. Cleanup using Repository
         if (audioFilePath) {
           try {
             await defaultStorageRepository.deleteFile(audioFilePath);
