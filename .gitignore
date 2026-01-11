@@ -46,6 +46,26 @@ pids
 coverage/
 *.lcov
 
+# Video data and metadata
+VideoList_R2.json
+VideoList*.json
+missing-*.json
+
+# Python virtual environment
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+uv.lock
+
+# Temporary files
+*.tmp
+*.temp
+*.part
+*.ytdl
+
 # Optional
 .npm/
 .eslintcache
