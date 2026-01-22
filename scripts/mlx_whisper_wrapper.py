@@ -10,9 +10,6 @@ import os
 import argparse
 from typing import Dict, List, Any, Optional
 
-# Add MLX Whisper path
-sys.path.append('/Users/chchen/Andy_Folder/Project/Personal/transcribe/mlx-whisper/mlx-examples/whisper')
-
 try:
     import mlx_whisper
 except ImportError as e:

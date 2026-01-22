@@ -1,20 +1,20 @@
-# Whisper AI Video Processing Pipeline
+# Whisper Video Processing Pipeline
 
-> Enterprise-grade AI-driven YouTube video processing system with Clean Architecture and event-driven design
+> Automated YouTube video transcription, translation, and segmentation service
 
-## 🎯 System Overview
+## 🎯 Overview
 
-An automated video processing platform built on Whisper AI that delivers a complete workflow from YouTube videos to multilingual subtitles. The system employs microservices architecture with horizontal scaling and fault tolerance capabilities.
+This project uses Whisper AI to process YouTube videos and generate multilingual subtitles. The entire pipeline from downloading to uploading is automated, with SQS handling job scheduling.
 
-### Key Features
-- **🤖 Fully Automated Pipeline** - SQS-driven unattended video processing
-- **🏗️ Clean Architecture** - Strict layered architecture with dependency injection
-- **🌐 Multilingual Support** - AI-powered intelligent translation and segmentation
-- **☁️ Cloud-Native Design** - Cloudflare R2 storage + AWS SQS queuing
-- **⚡ High-Performance Transcription** - MLX Whisper (Apple Silicon optimized)
-- **📊 Language Difficulty Analysis** - AI-powered content learning difficulty assessment
+### Features
+- **🤖 Automated Processing** - Drop video IDs into SQS, workers handle the rest
+- **🏗️ Clean Architecture** - Layered design for maintainability and testing
+- **🌐 Multilingual Subtitles** - Auto-translate after transcription
+- **☁️ Cloud Storage** - Cloudflare R2 for files, AWS SQS for queuing
+- **⚡ MLX Whisper** - Runs fast on Apple Silicon
+- **📊 Language Difficulty Analysis** - Assess content difficulty for learners
 
-## 🔄 Cloud Architecture & Workflow
+## 🔄 Architecture
 
 ### System Architecture
 
@@ -128,70 +128,71 @@ sequenceDiagram
     end
 ```
 
-### Processing Stages
+### Pipeline Steps
 
-1. **📥 Job Enqueuing** - Client submits YouTube video IDs via API Gateway to SQS queue
-2. **🔄 HTTP Polling** - Worker nodes poll API Gateway `/dequeue` endpoint every 10 minutes via HTTPS GET
-3. **⬇️ Video Download** - Download audio and metadata using `yt-dlp`
-4. **🎙️ Speech Transcription** - Generate high-precision SRT subtitles with MLX Whisper
-5. **✂️ Intelligent Segmentation** - AI-powered segmentation of long subtitles into topic-based segments
-6. **🌍 Multilingual Translation** - Automatic translation to target languages (zh-TW, ja, ko, etc.)
-7. **📈 Language Analysis** - AI assessment of content learning difficulty
-8. **☁️ Cloud Storage** - Structured upload to Cloudflare R2
-9. **📋 Index Update** - Update VideoList.json master index
+1. **📥 Enqueue** - Submit YouTube video IDs to SQS
+2. **🔄 Poll** - Workers poll API Gateway `/dequeue` every 10 minutes
+3. **⬇️ Download** - Fetch audio and metadata via `yt-dlp`
+4. **🎙️ Transcribe** - MLX Whisper generates SRT subtitles
+5. **✂️ Segment** - GPT/Gemini splits subtitles into topic sections
+6. **🌍 Translate** - Convert to zh-TW, ja, ko, etc.
+7. **📈 Analyze** - Evaluate language difficulty level
+8. **☁️ Upload** - Store to Cloudflare R2
+9. **📋 Update Index** - Update VideoList.json
 
-## 🛠️ Technical Stack
+## 🛠️ Tech Stack
 
-- **Backend Framework**: TypeScript + Node.js + Express
-- **AI Engine**: MLX Whisper (Apple Silicon optimized) / Whisper.cpp
-- **AI Services**: OpenAI GPT-4 / Google Gemini
-- **Message Queue**: AWS SQS (Event-driven architecture)
-- **Cloud Storage**: Cloudflare R2 (S3-compatible)
-- **Real-time Communication**: Socket.IO (Progress streaming)
-- **Containerization**: Docker + Docker Compose
+- **Backend**: TypeScript + Node.js + Express
+- **Transcription**: MLX Whisper (M1/M2/M3 optimized) / Whisper.cpp
+- **AI**: OpenAI GPT-4 / Google Gemini
+- **Queue**: AWS SQS
+- **Storage**: Cloudflare R2 (S3-compatible)
+- **Real-time**: Socket.IO
+- **Container**: Docker
 
 ## 🚀 Quick Start
 
-### Prerequisites
+### Requirements
 
 - **Node.js** 18+
-- **Python** 3.11+ (MLX Whisper requirement)
-- **Apple Silicon** (M1/M2/M3 recommended for MLX optimization)
+- **Python** 3.11+ (for MLX Whisper)
+- **Apple Silicon** (M1/M2/M3 recommended for MLX)
 - **uv/uvx** (Python package management)
 
 ### Installation
 
-1. **Clone Repository**
+1. **Clone**
 ```bash
 git clone <repository-url>
 cd whisper-node-backend
 ```
 
-2. **Install Dependencies**
+2. **Install dependencies**
 ```bash
 npm install
 ```
 
-3. **Python Environment Setup**
+3. **Python setup**
 ```bash
-# Install uv (Python package manager)
+# Install uv (if not installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# MLX Whisper will be auto-installed on first use
+# Create venv and install dependencies
+uv sync
 ```
 
-4. **Environment Configuration**
+4. **Configure environment**
 ```bash
 cp .env.example .env
-# Edit .env to configure API keys and storage settings
+# Edit .env with your API keys and storage settings
 ```
 
-5. **Start Services**
+5. **Start**
 ```bash
-# Development mode (auto-reload)
+# Development
 npm run dev
 
-# Production mode
+# Production
 npm run build
 npm start
 ```
@@ -199,33 +200,33 @@ npm start
 ### Environment Variables
 
 ```bash
-# Server Configuration
+# Server
 PORT=8001
 
-# Storage Configuration
+# Storage
 STORAGE_TYPE=r2                    # local | r2
 R2_BUCKET_NAME=your_bucket_name
 
-# AI Service Configuration
+# AI
 OPENAI_API_KEY=your_openai_key
 GEMINI_API_KEY=your_gemini_key
 AI_PROVIDER=gemini                 # openai | gemini
 
-# SQS Auto Processing Configuration
-SQS_AUTO_SEGMENT=true             # Auto segmentation
-SQS_AUTO_TRANSLATE=true           # Auto translation
-SQS_AUTO_LANGUAGE_ANALYSIS=true   # Auto language analysis
-SQS_TARGET_LANGUAGES=zh-TW,ja,ko  # Target translation languages
-SQS_SEGMENT_COUNT=6               # Target segment count
-SQS_AI_SERVICE=gemini             # AI service selection
+# SQS auto-processing
+SQS_AUTO_SEGMENT=true             # Auto segment
+SQS_AUTO_TRANSLATE=true           # Auto translate
+SQS_AUTO_LANGUAGE_ANALYSIS=true   # Auto analyze difficulty
+SQS_TARGET_LANGUAGES=zh-TW,ja,ko  # Target languages
+SQS_SEGMENT_COUNT=6               # Number of segments
+SQS_AI_SERVICE=gemini             # Which AI to use
 ```
 
-## 📡 API Endpoints
+## 📡 API
 
-### Core Transcription APIs
+### Transcription
 
 ```bash
-# YouTube Video Transcription (MLX Whisper)
+# YouTube video transcription
 POST /api/transcribe-youtube-mlx
 Content-Type: application/json
 {
@@ -233,22 +234,22 @@ Content-Type: application/json
   "language": "auto"
 }
 
-# Audio File Transcription
+# Audio file transcription
 POST /api/transcribe-mlx
 Content-Type: multipart/form-data
 # Upload WAV file
 
-# YouTube to SRT Conversion
+# YouTube to SRT
 POST /api/youtube-to-srt
 {
   "url": "https://www.youtube.com/watch?v=VIDEO_ID"
 }
 ```
 
-### SRT Processing APIs
+### SRT Processing
 
 ```bash
-# SRT Intelligent Segmentation
+# Segment
 POST /api/srt/segment
 {
   "videoId": "VIDEO_ID",
@@ -257,7 +258,7 @@ POST /api/srt/segment
   "aiService": "gemini"
 }
 
-# SRT Translation
+# Translate
 POST /api/srt/translate
 {
   "videoId": "VIDEO_ID",
@@ -266,17 +267,17 @@ POST /api/srt/translate
   "aiService": "gemini"
 }
 
-# Get Segmentation Results
+# Get segmentation results
 GET /api/srt/segmentation/{videoId}/{language}
 
-# Get SRT Content
+# Get SRT
 GET /api/srt/{videoId}/{language}
 ```
 
-### Batch Processing APIs
+### Batch Processing
 
 ```bash
-# Batch Process Multiple Videos
+# Process multiple videos
 POST /api/batch/process-multiple
 {
   "videoIds": ["VIDEO_ID_1", "VIDEO_ID_2"],
@@ -290,60 +291,60 @@ POST /api/batch/process-multiple
 # Process from R2 VideoList
 POST /api/batch/process-from-r2
 
-# Check Batch Job Status
+# Check job status
 GET /api/batch/status/{jobId}
 
-# List All Batch Jobs
+# List all jobs
 GET /api/batch/jobs
 ```
 
-### Language Analysis APIs
+### Language Analysis
 
 ```bash
-# Batch Language Difficulty Analysis
+# Batch analyze difficulty
 POST /api/batch-analyze-language-level
 {
   "videoIds": ["VIDEO_ID_1", "VIDEO_ID_2"],
   "aiService": "gemini"
 }
 
-# Get Language Analysis Results
+# Get analysis results
 GET /api/language-analysis/{videoId}
 
-# Get Analysis Statistics
+# Get stats
 GET /api/language-analysis/stats
 ```
 
-## 🏗️ Architecture Highlights
+## 🏗️ Architecture Notes
 
-### Clean Architecture Implementation
-- **Controllers**: Handle HTTP/WebSocket requests only
-- **Use Cases**: Orchestrate business workflows
-- **Services**: Implement single business capabilities
-- **Repositories**: Abstract storage operations behind interfaces
-- **Domain**: Core entities and repository interfaces
+### Clean Architecture
+- **Controllers** - Handle HTTP/WebSocket requests
+- **Use Cases** - Orchestrate business workflows
+- **Services** - Single-purpose implementations
+- **Repositories** - Abstract storage operations
+- **Domain** - Core entities and interfaces
 
-### Event-Driven Design
-- **SQS Integration**: Decoupled video processing workflows
-- **HTTP Polling**: Worker nodes poll API Gateway every 10 minutes
-- **Dead Letter Queue**: Failed job handling and retry mechanisms
-- **Horizontal Scaling**: Multiple worker nodes for load distribution
+### Event-Driven
+- **SQS** - Decouples video processing
+- **HTTP Polling** - Workers poll every 10 minutes
+- **Dead Letter Queue** - Failed jobs go to DLQ
+- **Horizontal Scaling** - Multiple workers share load
 
-### Cloud-Native Architecture
-- **Cloudflare R2**: S3-compatible object storage
-- **Cloudflare Workers**: Edge functions for storage operations
-- **AWS Lambda**: Serverless queue management
-- **API Gateway**: Unified entry point for SQS operations
+### Cloud-Native
+- **Cloudflare R2** - S3-compatible object storage
+- **Cloudflare Workers** - Edge functions for storage ops
+- **AWS Lambda** - Serverless queue management
+- **API Gateway** - Unified entry point for SQS
 
 ## 🐳 Deployment
 
-### Docker Deployment
+### Docker
 
 ```bash
-# Build Image
+# Build
 docker build -t whisper-backend .
 
-# Run Container
+# Run
 docker run -d \
   --name whisper-backend \
   -p 8001:8001 \
@@ -352,41 +353,32 @@ docker run -d \
   whisper-backend
 ```
 
-### Production Configuration
+### Production Setup
 
-1. **Environment Setup** - Configure R2 storage and AI API keys
-2. **SQS Queue Setup** - Create AWS SQS queue and API Gateway
-3. **Load Balancing** - Use Nginx or CloudFlare for load balancing
-4. **Monitoring** - Integrate CloudWatch or other monitoring services
+1. **Environment** - Configure R2 and AI API keys
+2. **SQS** - Create AWS SQS queue and API Gateway
+3. **Load Balancing** - Nginx or CloudFlare
+4. **Monitoring** - CloudWatch or similar
 
-## 📊 Monitoring & Health Checks
+## 📊 Monitoring
 
-### Health Check Endpoints
+### Health Check
 
 ```bash
-# Basic Health Check
+# Basic check
 GET /health
 
-# MLX Whisper Service Check
+# MLX Whisper status
 GET /api/mlx-health
 ```
 
-### Structured Logging
+### Logs
 
-- **SQS Processing Logs** - Job acquisition and processing status
-- **Transcription Progress** - MLX Whisper processing progress
-- **AI Service Logs** - OpenAI/Gemini API call status
-- **Storage Operation Logs** - R2 upload/download status
+- **SQS Processing** - Job acquisition and status
+- **Transcription Progress** - MLX Whisper progress
+- **AI Calls** - OpenAI/Gemini API status
+- **Storage Ops** - R2 upload/download status
 
 ## 📄 License
 
-MIT License - See [LICENSE](LICENSE) file for details
-
----
-
-**🎯 Project Highlights**
-- Enterprise-grade Clean Architecture design
-- Event-driven microservices architecture
-- AI-powered intelligent content processing
-- Cloud-native scalable design
-- Complete automated workflow pipeline
+MIT License

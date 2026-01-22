@@ -63,7 +63,7 @@ src/
 ### External Dependencies
 
 - YouTube processing uses `youtube-dl-exec` for downloading
-- MLX Whisper integration at `/Users/chchen/Andy_Folder/Project/Personal/transcribe/mlx-whisper/venv/bin/mlx_whisper`
+- MLX Whisper integration at `.venv/bin/mlx_whisper` (project-local virtual environment)
 - Real-time progress reporting via Socket.IO events
 
 ### Development Notes

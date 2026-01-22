@@ -79,7 +79,7 @@ export const youtubeToSrtService = {
       }
       
       // 4. 執行 MLX Whisper 命令生成 SRT
-      const mlxWhisperPath = "/Users/chchen/Andy_Folder/Project/Personal/transcribe/mlx-whisper/venv/bin/mlx_whisper";
+      const mlxWhisperPath = join(process.cwd(), ".venv/bin/mlx_whisper");
       const outputDir = join(process.cwd(), "uploads");
       const srtFileName = `${jobId}.srt`;
       const outputPath = join(outputDir, srtFileName);
