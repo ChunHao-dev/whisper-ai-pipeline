@@ -26,7 +26,7 @@ jobs:
                 ...missing.map(f => `- **${f}**`),
                 '',
                 'Please use the [issue template](../issues/new/choose) to submit your issue.',
-                'Closing this issue automatically.'
+                'Please update the issue with the missing information.'
               ].join('\n');
 
               await github.rest.issues.createComment({
@@ -35,10 +35,9 @@ jobs:
                 body: msg
               });
 
-              await github.rest.issues.update({
+              await github.rest.issues.addLabels({
                 ...context.repo,
                 issue_number: context.issue.number,
-                state: 'closed',
-                labels: ['invalid']
+                labels: ['incomplete']
               });
             }
