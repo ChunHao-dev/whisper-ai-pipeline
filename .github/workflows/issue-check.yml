@@ -1,0 +1,44 @@
+name: Issue Template Check
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Validate issue content
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.issue.body || '';
+            const required = ['What happened?', 'Steps to reproduce'];
+            const missing = required.filter(field => !body.includes(field));
+
+            if (missing.length > 0) {
+              const msg = [
+                '⚠️ This issue does not follow the required template.',
+                '',
+                'Missing sections:',
+                ...missing.map(f => `- **${f}**`),
+                '',
+                'Please use the [issue template](../issues/new/choose) to submit your issue.',
+                'Closing this issue automatically.'
+              ].join('\n');
+
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: context.issue.number,
+                body: msg
+              });
+
+              await github.rest.issues.update({
+                ...context.repo,
+                issue_number: context.issue.number,
+                state: 'closed',
+                labels: ['invalid']
+              });
+            }
